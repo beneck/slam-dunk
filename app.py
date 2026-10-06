@@ -49,7 +49,8 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS match_scores (id INTEGER PRIMARY KEY AUTOINCREMENT, match_id INTEGER, player_name TEXT, shots INTEGER, hits INTEGER, pts REAL, shot_data TEXT)''')
     c.execute("SELECT * FROM users WHERE username='Admin'")
     if not c.fetchone(): c.execute("INSERT INTO users VALUES (?, ?, ?)", ('Admin', hashlib.sha256(b'admin123').hexdigest(), 'admin'))
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
 
 def run_query(query, params=()):
     conn = sqlite3.connect(DB_FILE)
@@ -281,7 +282,6 @@ if st.session_state['logged_in']:
                     if opp_w[1]['W'] > 0: favorite = f"{opp_w[0]} ({opp_w[1]['W']} Siege)"
 
                 for idx, row in player_matches.iterrows():
-                    # Mit führenden Nullen (M01, M02, ..., M07, ..., M69, M70), damit Charts absolut korrekt sortieren!
                     hist_data.append({'Match': f"M{idx+1:02d}", 'pts': row['pts'], 'hits': row['hits'], 'shots': row['shots'], 'bonus': max(0, row['pts']-row['hits'])})
                 
                 df_hist = pd.DataFrame(hist_data)
@@ -400,7 +400,7 @@ if st.session_state['logged_in']:
         
         # --- AUTO OVERTIME LOGIC ---
         current_pts = [p['pts'] for p in players_data]
-        max_pts = max(current_pts)
+        max_pts = max(current_pts) if current_pts else 0
         tied_players = [i for i, pts in enumerate(current_pts) if pts == max_pts]
         
         ot_round = 0
@@ -434,7 +434,23 @@ if st.session_state['logged_in']:
                     players_data[i]['shots'] += 3
 
             current_pts = [players_data[i]['pts'] for i in tied_players]
-            max_ot_pts = max(current_pts)
+            max_ot_pts = max(current_pts) if current_pts else 0
             new_tied_players = [i for i in tied_players if players_data[i]['pts'] == max_ot_pts]
             
             if len(new_tied_players) > 1:
+                if not st.checkbox(f"✅ Ergebnisse für Overtime {ot_round} bestätigen, um fortzufahren", key=f"conf_ot_{ot_round}"):
+                    break
+                tied_players = new_tied_players
+            else:
+                break
+                
+        st.divider()
+        if st.button("🔥 MATCH SPEICHERN", type="primary", use_container_width=True):
+            if any(not p['name'] or not p['name'].strip() for p in players_data):
+                st.error("Bitte alle Namen ausfüllen (bei 'Neuer Spieler' das Textfeld nutzen)!")
+            else:
+                mode = "1v" * (len(players_data)-1) + "1"
+                conn = sqlite3.connect(DB_FILE)
+                cur = conn.cursor()
+                cur.execute("INSERT INTO matches (date, mode, is_historical) VALUES (?, ?, ?)", (str(date.today()), mode, False))
+                m_id = cur.
