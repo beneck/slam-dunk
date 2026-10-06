@@ -248,7 +248,6 @@ if st.session_state['logged_in']:
             
             if hist_rows:
                 df_show = pd.DataFrame(hist_rows)
-                # Numerische Sortierung nach Match-ID garantiert exakte Reihenfolge unabhängig von String-Längen
                 df_show = df_show.sort_values(by=['Match-ID'], ascending=(sort_order == "Älteste zuerst"))
                 st.dataframe(df_show[['Datum', 'Modus', 'Ergebnis']], use_container_width=True, hide_index=True)
 
@@ -349,7 +348,6 @@ if st.session_state['logged_in']:
                 df_comp = pd.DataFrame(comp_data)
                 if not df_comp.empty:
                     df_pivot = df_comp.pivot(index='Match-Nr.', columns='Spieler', values='Kumulierte Trefferquote (%)')
-                    # Korrigiert von method='ffill' auf das moderne .ffill()
                     df_pivot = df_pivot.ffill()
                     st.write("**Entwicklung der All-Time Trefferquote (nach Anzahl gespielter Matches):**")
                     st.line_chart(df_pivot)
@@ -423,7 +421,7 @@ if st.session_state['logged_in']:
                         for s in range(3):
                             res = cols[s].selectbox("Wurf", ["❌", "🏀", "🗑️"], index=None, placeholder=f"{s+1}. Wurf", key=f"w_ot_{i}_{ot_round}_{s}", label_visibility="collapsed")
                             ot_shots.append(res)
-                        reg_hits = sum(1 for x in ot_shots if x in ["🏀", "🗑️"])
+                        reg_hits = sum(1 for x in ot_shots if x in ["🏀", "🗑️️"])
                         reg_bonus = sum(1 for x in ot_shots if x == "🗑️")
                     else:
                         c1, c2 = st.columns(2)
@@ -473,22 +471,47 @@ if st.session_state['logged_in']:
                 st.download_button("📥 Aktuelle Datenbank als CSV herunterladen", data=csv, file_name="office_hoops_backup.csv", mime="text/csv")
                 st.divider()
 
-            st.markdown("### 📥 Alter Excel-Import")
-            uploaded_file = st.file_uploader("Altes Slam Dunk Scoresheet.xlsx", type=["xlsx"])
+            st.markdown("### 📥 Excel-Import (1v1, 3er & 4er Matches)")
+            uploaded_file = st.file_uploader("Slam Dunk Scoresheet.xlsx", type=["xlsx"])
             if uploaded_file and st.button("⚡ Daten importieren"):
-                with st.spinner("Importiere Matches..."):
+                with st.spinner("Importiere alle Matches (1v1, 3er, 4er)..."):
                     df_excel = pd.read_excel(uploaded_file, sheet_name="Rechensheet", header=1)
                     conn = sqlite3.connect(DB_FILE); cur = conn.cursor()
+                    new_count = 0
                     
+                    # 1v1 Matches
                     df_2er = df_excel[['Datum', 'Spieler 1', 'Spieler 2', 'Würfe', 'Punkte SP1', 'Punkte SP2', 'Treffer SP1', 'Treffer SP2']].dropna(subset=['Spieler 1', 'Spieler 2'])
                     for _, r in df_2er.iterrows():
                         cur.execute("INSERT INTO matches (date, mode, is_historical) VALUES (?, ?, ?)", (str(r['Datum'])[:10], '1v1', True))
                         m_id = cur.lastrowid
                         cur.execute("INSERT INTO match_scores (match_id, player_name, shots, hits, pts, shot_data) VALUES (?,?,?,?,?,?)", (m_id, r['Spieler 1'], r['Würfe'], r['Treffer SP1'], r['Punkte SP1'], '[]'))
                         cur.execute("INSERT INTO match_scores (match_id, player_name, shots, hits, pts, shot_data) VALUES (?,?,?,?,?,?)", (m_id, r['Spieler 2'], r['Würfe'], r['Treffer SP2'], r['Punkte SP2'], '[]'))
+                        new_count += 1
+                    
+                    # 3er Matches (1v1v1)
+                    df_3er = df_excel[['Datum.1', 'Spieler 1.1', 'Spieler 2.1', 'Spieler 3', 'Würfe SP1', 'Würfe SP2', 'Würfe SP3', 'Punkte SP1.1', 'Punkte SP2.1', 'Punkte SP3', 'Treffer SP1.1', 'Treffer SP2.1', 'Treffer SP3']].dropna(subset=['Spieler 1.1', 'Spieler 2.1', 'Spieler 3'])
+                    for _, r in df_3er.iterrows():
+                        cur.execute("INSERT INTO matches (date, mode, is_historical) VALUES (?, ?, ?)", (str(r['Datum.1'])[:10], '1v1v1', True))
+                        m_id = cur.lastrowid
+                        cur.execute("INSERT INTO match_scores (match_id, player_name, shots, hits, pts, shot_data) VALUES (?,?,?,?,?,?)", (m_id, r['Spieler 1.1'], r['Würfe SP1'], r['Treffer SP1.1'], r['Punkte SP1.1'], '[]'))
+                        cur.execute("INSERT INTO match_scores (match_id, player_name, shots, hits, pts, shot_data) VALUES (?,?,?,?,?,?)", (m_id, r['Spieler 2.1'], r['Würfe SP2'], r['Treffer SP2.1'], r['Punkte SP2.1'], '[]'))
+                        cur.execute("INSERT INTO match_scores (match_id, player_name, shots, hits, pts, shot_data) VALUES (?,?,?,?,?,?)", (m_id, r['Spieler 3'], r['Würfe SP3'], r['Treffer SP3'], r['Punkte SP3'], '[]'))
+                        new_count += 1
+                            
+                    # 4er Matches (1v1v1v1)
+                    df_4er = df_excel[['Datum.2', 'Spieler 1.2', 'Spieler 2.2', 'Spieler 3.1', 'Spieler 4', 'Würfe SP1.1', 'Würfe SP2.1', 'Würfe SP3.1', 'Würfe SP4', 'Punkte SP1.2', 'Punkte SP2.2', 'Punkte SP3.1', 'Punkte SP4', 'Treffer SP1.2', 'Treffer SP2.2', 'Treffer SP3.1', 'Treffer SP4']].dropna(subset=['Spieler 1.2', 'Spieler 2.2', 'Spieler 3.1', 'Spieler 4'])
+                    for _, r in df_4er.iterrows():
+                        cur.execute("INSERT INTO matches (date, mode, is_historical) VALUES (?, ?, ?)", (str(r['Datum.2'])[:10], '1v1v1v1', True))
+                        m_id = cur.lastrowid
+                        cur.execute("INSERT INTO match_scores (match_id, player_name, shots, hits, pts, shot_data) VALUES (?,?,?,?,?,?)", (m_id, r['Spieler 1.2'], r['Würfe SP1.1'], r['Treffer SP1.2'], r['Punkte SP1.2'], '[]'))
+                        cur.execute("INSERT INTO match_scores (match_id, player_name, shots, hits, pts, shot_data) VALUES (?,?,?,?,?,?)", (m_id, r['Spieler 2.2'], r['Würfe SP2.1'], r['Treffer SP2.2'], r['Punkte SP2.2'], '[]'))
+                        cur.execute("INSERT INTO match_scores (match_id, player_name, shots, hits, pts, shot_data) VALUES (?,?,?,?,?,?)", (m_id, r['Spieler 3.1'], r['Würfe SP3.1'], r['Treffer SP3.1'], r['Punkte SP3.1'], '[]'))
+                        cur.execute("INSERT INTO match_scores (match_id, player_name, shots, hits, pts, shot_data) VALUES (?,?,?,?,?,?)", (m_id, r['Spieler 4'], r['Würfe SP4'], r['Treffer SP4'], r['Punkte SP4'], '[]'))
+                        new_count += 1
                     
                     conn.commit(); conn.close()
-                    st.success("Import abgeschlossen!"); st.rerun()
+                    st.success(f"Import erfolgreich! {new_count} Matches (1v1, 3er und 4er) eingelesen.")
+                    st.rerun()
 
             st.divider()
             st.markdown("### 🧨 DANGER ZONE (Datenbank löschen)")
