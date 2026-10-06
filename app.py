@@ -453,4 +453,118 @@ if st.session_state['logged_in']:
                 conn = sqlite3.connect(DB_FILE)
                 cur = conn.cursor()
                 cur.execute("INSERT INTO matches (date, mode, is_historical) VALUES (?, ?, ?)", (str(date.today()), mode, False))
-                m_id = cur.
+                m_id = cur.lastrowid
+                for p in players_data:
+                    cur.execute("INSERT INTO match_scores (match_id, player_name, shots, hits, pts, shot_data) VALUES (?, ?, ?, ?, ?, ?)", (m_id, p['name'], p['shots'], p['hits'], p['pts'], p['shot_data']))
+                conn.commit()
+                conn.close()
+                st.balloons()
+                st.success("Match heldenhaft gespeichert!")
+                st.session_state.match_players_count = 2
+                st.rerun()
+
+    # ---------------- 5. ADMIN & IMPORT / EXPORT ----------------
+    with tabs[4]:
+        if st.session_state['role'] == 'admin':
+            st.subheader("🛠️ Admin-Bereich & Datenbank-Management")
+            
+            if not df_all.empty:
+                st.markdown("### 💾 Backup Exportieren")
+                st.write("Lade hier deine Datenbank herunter, bevor du etwas änderst!")
+                csv = df_all.to_csv(index=False).encode('utf-8')
+                st.download_button("📥 Aktuelle Datenbank als CSV herunterladen", data=csv, file_name="office_hoops_backup.csv", mime="text/csv")
+                st.divider()
+
+            st.markdown("### 📥 Excel-Import (1v1, 3er & 4er Matches - Chronologisch sortiert)")
+            uploaded_file = st.file_uploader("Slam Dunk Scoresheet.xlsx", type=["xlsx"])
+            if uploaded_file and st.button("⚡ Daten importieren"):
+                with st.spinner("Importiere und sortiere alle Matches chronologisch..."):
+                    df_excel = pd.read_excel(uploaded_file, sheet_name="Rechensheet", header=1)
+                    
+                    import_list = []
+                    
+                    # 1v1
+                    if 'Datum' in df_excel.columns and 'Spieler 1' in df_excel.columns and 'Spieler 2' in df_excel.columns:
+                        df_2er = df_excel[['Datum', 'Spieler 1', 'Spieler 2', 'Würfe', 'Punkte SP1', 'Punkte SP2', 'Treffer SP1', 'Treffer SP2']].dropna(subset=['Spieler 1', 'Spieler 2'])
+                        for _, r in df_2er.iterrows():
+                            d = pd.to_datetime(r['Datum'], errors='coerce')
+                            d_str = d.strftime('%Y-%m-%d') if pd.notna(d) else '2025-01-01'
+                            import_list.append({
+                                'date': d_str, 'mode': '1v1',
+                                'players': [
+                                    {'name': str(r['Spieler 1']).strip(), 'shots': r['Würfe'] if pd.notna(r['Würfe']) else 10, 'hits': r['Treffer SP1'] if pd.notna(r['Treffer SP1']) else 0, 'pts': r['Punkte SP1'] if pd.notna(r['Punkte SP1']) else 0},
+                                    {'name': str(r['Spieler 2']).strip(), 'shots': r['Würfe'] if pd.notna(r['Würfe']) else 10, 'hits': r['Treffer SP2'] if pd.notna(r['Treffer SP2']) else 0, 'pts': r['Punkte SP2'] if pd.notna(r['Punkte SP2']) else 0}
+                                ]
+                            })
+
+                    # 3er
+                    col_d3 = 'Datum.1' if 'Datum.1' in df_excel.columns else 'Datum'
+                    if col_d3 in df_excel.columns and 'Spieler 1.1' in df_excel.columns and 'Spieler 2.1' in df_excel.columns and 'Spieler 3' in df_excel.columns:
+                        df_3er = df_excel.dropna(subset=['Spieler 1.1', 'Spieler 2.1', 'Spieler 3'])
+                        for _, r in df_3er.iterrows():
+                            d = pd.to_datetime(r[col_d3], errors='coerce')
+                            d_str = d.strftime('%Y-%m-%d') if pd.notna(d) else '2025-01-01'
+                            w1 = r['Würfe SP1'] if 'Würfe SP1' in df_excel.columns and pd.notna(r['Würfe SP1']) else 10
+                            w2 = r['Würfe SP2'] if 'Würfe SP2' in df_excel.columns and pd.notna(r['Würfe SP2']) else 10
+                            w3 = r['Würfe SP3'] if 'Würfe SP3' in df_excel.columns and pd.notna(r['Würfe SP3']) else 10
+                            import_list.append({
+                                'date': d_str, 'mode': '1v1v1',
+                                'players': [
+                                    {'name': str(r['Spieler 1.1']).strip(), 'shots': w1, 'hits': r.get('Treffer SP1.1', 0), 'pts': r.get('Punkte SP1.1', 0)},
+                                    {'name': str(r['Spieler 2.1']).strip(), 'shots': w2, 'hits': r.get('Treffer SP2.1', 0), 'pts': r.get('Punkte SP2.1', 0)},
+                                    {'name': str(r['Spieler 3']).strip(), 'shots': w3, 'hits': r.get('Treffer SP3', 0), 'pts': r.get('Punkte SP3', 0)}
+                                ]
+                            })
+
+                    # 4er
+                    col_d4 = 'Datum.2' if 'Datum.2' in df_excel.columns else 'Datum'
+                    if col_d4 in df_excel.columns and 'Spieler 1.2' in df_excel.columns and 'Spieler 2.2' in df_excel.columns:
+                        df_4er = df_excel.dropna(subset=['Spieler 1.2', 'Spieler 2.2'])
+                        for _, r in df_4er.iterrows():
+                            d = pd.to_datetime(r[col_d4], errors='coerce')
+                            d_str = d.strftime('%Y-%m-%d') if pd.notna(d) else '2025-01-01'
+                            import_list.append({
+                                'date': d_str, 'mode': '1v1v1v1',
+                                'players': [
+                                    {'name': str(r['Spieler 1.2']).strip(), 'shots': r.get('Würfe SP1.1', 10), 'hits': r.get('Treffer SP1.2', 0), 'pts': r.get('Punkte SP1.2', 0)},
+                                    {'name': str(r['Spieler 2.2']).strip(), 'shots': r.get('Würfe SP2.1', 10), 'hits': r.get('Treffer SP2.2', 0), 'pts': r.get('Punkte SP2.2', 0)},
+                                    {'name': str(r['Spieler 3.1']).strip(), 'shots': r.get('Würfe SP3.1', 10), 'hits': r.get('Treffer SP3.1', 0), 'pts': r.get('Punkte SP3.1', 0)},
+                                    {'name': str(r['Spieler 4']).strip(), 'shots': r.get('Würfe SP4', 10), 'hits': r.get('Treffer SP4', 0), 'pts': r.get('Punkte SP4', 0)}
+                                ]
+                            })
+
+                    # Chronologisch sortieren nach Datum, damit Match-IDs perfekt stimmen!
+                    import_list.sort(key=lambda x: x['date'])
+
+                    conn = sqlite3.connect(DB_FILE)
+                    cur = conn.cursor()
+                    new_count = 0
+                    for match in import_list:
+                        cur.execute("INSERT INTO matches (date, mode, is_historical) VALUES (?, ?, ?)", (match['date'], match['mode'], True))
+                        m_id = cur.lastrowid
+                        for p in match['players']:
+                            if pd.notna(p['name']) and str(p['name']).strip() != '' and str(p['name']) != 'nan':
+                                cur.execute("INSERT INTO match_scores (match_id, player_name, shots, hits, pts, shot_data) VALUES (?,?,?,?,?,?)", 
+                                            (m_id, str(p['name']).strip(), int(p['shots']) if pd.notna(p['shots']) else 10, int(p['hits']) if pd.notna(p['hits']) else 0, float(p['pts']) if pd.notna(p['pts']) else 0, '[]'))
+                        new_count += 1
+                    
+                    conn.commit()
+                    conn.close()
+                    st.success(f"Import erfolgreich! {new_count} Matches (chronologisch sortiert) eingelesen.")
+                    st.rerun()
+
+            st.divider()
+            st.markdown("### 🧨 DANGER ZONE (Datenbank löschen)")
+            if st.checkbox("Ich bin mir sicher, dass ich alle Matches unwiderruflich löschen möchte."):
+                if st.button("🚨 GESAMTE MATCH-DATENBANK ZURÜCKSETZEN 🚨"):
+                    conn = sqlite3.connect(DB_FILE)
+                    cur = conn.cursor()
+                    cur.execute("DROP TABLE IF EXISTS matches")
+                    cur.execute("DROP TABLE IF EXISTS match_scores")
+                    conn.commit()
+                    conn.close()
+                    init_db()
+                    st.success("Tabelle erfolgreich gelöscht!")
+                    st.rerun()
+else:
+    st.info("Bitte melde dich in der Kabine (links) an. 🏟️")
