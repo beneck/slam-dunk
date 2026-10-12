@@ -51,6 +51,7 @@ def init_db():
     if not c.fetchone(): c.execute("INSERT INTO users VALUES (?, ?, ?)", ('Admin', hashlib.sha256(b'admin123').hexdigest(), 'admin'))
     conn.commit()
     conn.close()
+#test
 
 def run_query(query, params=()):
     conn = sqlite3.connect(DB_FILE)
