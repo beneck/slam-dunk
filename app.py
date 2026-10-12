@@ -11,6 +11,7 @@ st.set_page_config(page_title="Slam Dunk Tracker", page_icon="🏀", layout="wid
 
 st.markdown("""
     <style>
+    :root { color-scheme: dark; }
     .main-title { font-family: 'Impact', sans-serif; color: #FF5722; font-size: 3.5rem !important; text-transform: uppercase; text-shadow: 2px 2px 5px rgba(255, 87, 34, 0.4); text-align: center; margin-bottom: 5px; }
     .sub-title { text-align: center; color: #94a3b8; font-size: 1.2rem; margin-bottom: 40px; font-weight: bold; }
     div[data-testid="stMetricValue"] { color: #FF5722 !important; font-weight: 900; }
@@ -51,7 +52,7 @@ def init_db():
     if not c.fetchone(): c.execute("INSERT INTO users VALUES (?, ?, ?)", ('Admin', hashlib.sha256(b'admin123').hexdigest(), 'admin'))
     conn.commit()
     conn.close()
-#test
+
 
 def run_query(query, params=()):
     conn = sqlite3.connect(DB_FILE)
