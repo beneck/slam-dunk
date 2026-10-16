@@ -27,7 +27,6 @@ st.markdown("""
     .record-card h4 { color: #FF5722 !important; margin-top: 0; }
     .record-card p { color: #f8fafc !important; margin-bottom: 5px; }
     .highlight-banner { background: linear-gradient(90deg, #1e293b 0%, #0f172a 100%); border: 1px solid #334155; border-left: 5px solid #FF5722; color: white; padding: 15px 20px; border-radius: 10px; font-weight: bold; margin-bottom: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.4); }
-    .player-card { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 2px solid #FF5722; border-radius: 15px; padding: 20px; text-align: center; box-shadow: 0 4px 15px rgba(0,0,0,0.4); margin-bottom: 20px; color: white; }
     .pro-card-container { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1px solid #334155; border-radius: 15px; padding: 15px; box-shadow: 0 8px 20px rgba(0,0,0,0.5); color: #f8fafc; }
     .pro-card-stats { display: flex; justify-content: space-around; text-align: center; margin-top: 15px; padding-top: 15px; border-top: 1px solid #334155; flex-wrap: wrap; gap: 10px; }
     .pro-stat-val { font-size: 22px; font-weight: 900; color: #FF5722; }
@@ -43,7 +42,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Ordner für Avatare
 UPLOAD_DIR = 'avatars'
 if not os.path.exists(UPLOAD_DIR): os.makedirs(UPLOAD_DIR)
 
@@ -129,7 +127,6 @@ st.markdown("<h1 class='main-title'>🏀 Office Slam Dunk Tracker</h1>", unsafe_
 st.markdown("<p class='sub-title'>High-End Büro-Basketball Analytics</p>", unsafe_allow_html=True)
 
 if st.session_state['logged_in']:
-    
     df_matches, df_scores, profiles_dict = load_all_data()
     
     df_all = pd.DataFrame()
@@ -147,7 +144,6 @@ if st.session_state['logged_in']:
             
             for i, row1 in group.iterrows():
                 p1 = row1['player_name']
-                
                 if p1 not in p_stats:
                     p_stats[p1] = {'hits': 0, 'wins': 0, 'bonus': 0, 'games': 0, 'pts': 0, 'shots': 0, 'no_scores': 0, 'matches': []}
                 p_stats[p1]['hits'] += row1['hits']
@@ -160,11 +156,7 @@ if st.session_state['logged_in']:
                 
                 opponents = [p for p in group['player_name'] if p != p1]
                 p_stats[p1]['matches'].append({
-                    'match_id': m_id,
-                    'date': row1['date'],
-                    'pts': row1['pts'],
-                    'is_win': p1 in winners,
-                    'opponents': opponents
+                    'match_id': m_id, 'date': row1['date'], 'pts': row1['pts'], 'is_win': p1 in winners, 'opponents': opponents
                 })
 
                 if p1 not in h2h: h2h[p1] = {}
@@ -186,16 +178,13 @@ if st.session_state['logged_in']:
                 if is_win:
                     if streaks[p1]['type'] == 'W': streaks[p1]['len'] += 1
                     else: streaks[p1]['type'] = 'W'; streaks[p1]['len'] = 1
-                    if streaks[p1]['len'] > streaks[p1]['max_W']:
-                        streaks[p1]['max_W'] = streaks[p1]['len']
+                    if streaks[p1]['len'] > streaks[p1]['max_W']: streaks[p1]['max_W'] = streaks[p1]['len']
                 else:
                     if streaks[p1]['type'] == 'W' and streaks[p1]['len'] > 0:
-                        if streaks[p1]['len'] == streaks[p1]['max_W']:
-                            streaks[p1]['max_W_breaker'] = ", ".join(winners)
+                        if streaks[p1]['len'] == streaks[p1]['max_W']: streaks[p1]['max_W_breaker'] = ", ".join(winners)
                     if streaks[p1]['type'] == 'L': streaks[p1]['len'] += 1
                     else: streaks[p1]['type'] = 'L'; streaks[p1]['len'] = 1
-                    if streaks[p1]['len'] > streaks[p1]['max_L']:
-                        streaks[p1]['max_L'] = streaks[p1]['len']
+                    if streaks[p1]['len'] > streaks[p1]['max_L']: streaks[p1]['max_L'] = streaks[p1]['len']
 
         highlights = []
         for p, d in p_stats.items():
@@ -285,25 +274,21 @@ if st.session_state['logged_in']:
             with c_s3:
                 st.markdown("<div class='record-card'><h4>⭐ All-Time Rekorde</h4>", unsafe_allow_html=True)
                 if not df_all.empty:
-                    # Hilfsfunktion, um Matches als Text auszugeben
                     def get_match_desc(m_id):
                         m_d = df_all[df_all['match_id'] == m_id]
                         return " vs ".join([f"{profiles_dict.get(r['player_name'], {}).get('nickname', r['player_name']) or r['player_name']} ({int(r['pts'])})" for _, r in m_d.iterrows()])
                     
-                    # Längstes Match
                     match_shots = df_all.groupby('match_id')['shots'].sum()
                     longest_match_id = match_shots.idxmax()
                     longest_match_shots = match_shots.max()
                     st.markdown(f"<p><b>Längstes Match:</b> <br>{get_match_desc(longest_match_id)} <br><i>({longest_match_shots} Gesamtwürfe)</i></p>", unsafe_allow_html=True)
                     
-                    # Meiste Treffer Spieler
                     max_hits_idx = df_all['hits'].idxmax()
                     max_hits_row = df_all.loc[max_hits_idx]
                     mh_p = profiles_dict.get(max_hits_row['player_name'], {}).get('nickname', max_hits_row['player_name']) or max_hits_row['player_name']
                     mh_opps = [profiles_dict.get(r['player_name'], {}).get('nickname', r['player_name']) or r['player_name'] for _, r in df_all[df_all['match_id'] == max_hits_row['match_id']].iterrows() if r['player_name'] != max_hits_row['player_name']]
                     st.markdown(f"<p><b>Meiste Treffer (Spieler):</b> <br>{mh_p} ({max_hits_row['hits']} Treffer) <br><i>Gegen {', '.join(mh_opps)}</i></p>", unsafe_allow_html=True)
                     
-                    # Punktereichstes Spiel
                     match_pts = df_all.groupby('match_id')['pts'].sum()
                     max_pts_match_id = match_pts.idxmax()
                     max_pts_match_val = match_pts.max()
@@ -395,19 +380,13 @@ if st.session_state['logged_in']:
 
                 col_profile, col_timeline = st.columns([2, 1])
                 
-with col_profile:
-                    # Profilbild laden oder schicken Standard-Avatar verwenden
+                with col_profile:
                     avatar_path = avatar_file if (avatar_file and os.path.exists(avatar_file)) else ""
-                    
                     b64_img = ""
                     if avatar_path:
                         with open(avatar_path, "rb") as img_file:
                             b64_img = base64.b64encode(img_file.read()).decode()
-                    else:
-                        # Schöner Standard-Avatar (Basketball-Icon als Fallback)
-                        b64_img = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" # Platzhalter, wir nutzen direkt eine URL:
                     
-                    # Nutzen wir direkt eine saubere Bild-URL als Standard-Avatar wenn keins da ist
                     img_src = f"data:image/png;base64,{b64_img}" if avatar_path else "https://cdn-icons-png.flaticon.com/512/889/889442.png"
                     img_tag = f"<img src='{img_src}' style='width: 90px; height: 90px; border-radius: 50%; object-fit: cover; margin-right: 20px; border: 3px solid #FF5722; background-color: #334155;'>"
 
@@ -436,8 +415,8 @@ with col_profile:
 </div>
 </div><br>"""
                     st.markdown(html_card, unsafe_allow_html=True)
-    
-with col_timeline:
+                
+                with col_timeline:
                     st.markdown("### 🗺️ Karriere Highlights")
                     milestones = []
                     p_m = d['matches']
@@ -468,7 +447,8 @@ with col_timeline:
                     for ms in milestones:
                         timeline_html += f"<div class='timeline-item'><div class='timeline-date'>{format_date_eu(ms['date'])} (M{ms['match_idx']})</div><div class='timeline-content'>{ms['title']}</div><div style='font-size: 0.85em; color: #cbd5e1;'>{ms['desc']}</div></div>"
                     timeline_html += "</div>"
-                    st.markdown(timeline_html, unsafe_allow_html=True)                
+                    st.markdown(timeline_html, unsafe_allow_html=True)
+                
                 c_ch1, c_ch2 = st.columns(2)
                 with c_ch1:
                     st.write("📈 **Trefferquote Kumuliert (All-Time):**")
@@ -666,7 +646,7 @@ with col_timeline:
             if use_t_det:
                 st.write("Erfasse deine Trainingswürfe:")
                 shot_array = []
-                cols = st.columns(5) # Zeige 5 Würfe pro Zeile
+                cols = st.columns(5)
                 for s in range(int(t_shots)):
                     res = cols[s % 5].selectbox(f"Wurf {s+1}", ["❌", "🏀", "🗑️"], index=None, key=f"t_w_{s}")
                     shot_array.append(res)
