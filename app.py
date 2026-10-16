@@ -437,7 +437,7 @@ with col_profile:
 </div><br>"""
                     st.markdown(html_card, unsafe_allow_html=True)
     
-                with col_timeline:
+with col_timeline:
                     st.markdown("### 🗺️ Karriere Highlights")
                     milestones = []
                     p_m = d['matches']
@@ -464,7 +464,6 @@ with col_profile:
 
                     milestones.sort(key=lambda x: x['match_idx'])
                     
-                    # WICHTIG: Keine Einrückungen in diesem String, da Markdown das sonst als Code-Block rendert!
                     timeline_html = "<div class='timeline-container'>"
                     for ms in milestones:
                         timeline_html += f"<div class='timeline-item'><div class='timeline-date'>{format_date_eu(ms['date'])} (M{ms['match_idx']})</div><div class='timeline-content'>{ms['title']}</div><div style='font-size: 0.85em; color: #cbd5e1;'>{ms['desc']}</div></div>"
