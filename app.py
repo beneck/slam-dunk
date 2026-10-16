@@ -28,15 +28,24 @@ st.markdown("""
     .record-card p { color: #f8fafc !important; margin-bottom: 5px; }
     .highlight-banner { background: linear-gradient(90deg, #1e293b 0%, #0f172a 100%); border: 1px solid #334155; border-left: 5px solid #FF5722; color: white; padding: 15px 20px; border-radius: 10px; font-weight: bold; margin-bottom: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.4); }
     .player-card { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 2px solid #FF5722; border-radius: 15px; padding: 20px; text-align: center; box-shadow: 0 4px 15px rgba(0,0,0,0.4); margin-bottom: 20px; color: white; }
-    .pro-card-container { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1px solid #334155; border-radius: 15px; padding: 25px; box-shadow: 0 8px 20px rgba(0,0,0,0.5); color: #f8fafc; }
-    .pro-card-stats { display: flex; justify-content: space-around; text-align: center; margin-top: 20px; padding-top: 20px; border-top: 1px solid #334155; flex-wrap: wrap; gap: 15px; }
-    .pro-stat-val { font-size: 26px; font-weight: 900; color: #FF5722; }
-    .pro-stat-label { color: #94a3b8; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
+    .pro-card-container { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1px solid #334155; border-radius: 15px; padding: 15px; box-shadow: 0 8px 20px rgba(0,0,0,0.5); color: #f8fafc; }
+    .pro-card-stats { display: flex; justify-content: space-around; text-align: center; margin-top: 15px; padding-top: 15px; border-top: 1px solid #334155; flex-wrap: wrap; gap: 10px; }
+    .pro-stat-val { font-size: 22px; font-weight: 900; color: #FF5722; }
+    .pro-stat-label { color: #94a3b8; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }
     .form-circle { display: inline-block; width: 25px; height: 25px; border-radius: 50%; text-align: center; line-height: 25px; font-weight: bold; margin-right: 5px; font-size: 12px; }
     .form-w { background-color: #4CAF50; color: white; }
     .form-l { background-color: #F44336; color: white; }
+    .timeline-container { padding: 10px; border-left: 2px solid #334155; margin-left: 10px; }
+    .timeline-item { margin-bottom: 15px; position: relative; padding-left: 20px; }
+    .timeline-item::before { content: ''; position: absolute; left: -6px; top: 5px; width: 10px; height: 10px; border-radius: 50%; background-color: #FF5722; }
+    .timeline-date { font-size: 0.8em; color: #94a3b8; }
+    .timeline-content { font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
+
+# Ordner für Avatare erstellen
+UPLOAD_DIR = 'avatars'
+if not os.path.exists(UPLOAD_DIR): os.makedirs(UPLOAD_DIR)
 
 def init_db():
     conn = psycopg2.connect(DB_URL)
@@ -45,6 +54,7 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS profiles (username TEXT PRIMARY KEY, nickname TEXT, avatar TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS matches (id SERIAL PRIMARY KEY, date TEXT, mode TEXT, is_historical BOOLEAN)''')
     c.execute('''CREATE TABLE IF NOT EXISTS match_scores (id SERIAL PRIMARY KEY, match_id INTEGER, player_name TEXT, shots INTEGER, hits INTEGER, pts REAL, shot_data TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS training_sessions (id SERIAL PRIMARY KEY, username TEXT, date TEXT, shots INTEGER, hits INTEGER, bonus INTEGER, notes TEXT)''')
     
     c.execute("SELECT * FROM users WHERE username='Admin'")
     if not c.fetchone():
@@ -72,7 +82,6 @@ def format_date_eu(date_str):
     except: return str(date_str)
 
 # --- 🚀 TURBO: DATENBANK CACHING ---
-# Speichert die Ergebnisse im Arbeitsspeicher (RAM). Verfällt automatisch nach 10 Minuten.
 @st.cache_data(ttl=600)
 def load_all_data():
     conn = psycopg2.connect(DB_URL)
@@ -80,9 +89,8 @@ def load_all_data():
     df_s = pd.read_sql("SELECT * FROM match_scores", conn)
     conn.close()
     
-    # Profile einmalig laden anstatt für jeden Spieler einzeln in einer Schleife
-    profiles_raw = run_query("SELECT username, nickname FROM profiles")
-    profiles_dict = {row[0]: row[1] for row in profiles_raw} if profiles_raw else {}
+    profiles_raw = run_query("SELECT username, nickname, avatar FROM profiles")
+    profiles_dict = {row[0]: {'nickname': row[1], 'avatar': row[2]} for row in profiles_raw} if profiles_raw else {}
     
     return df_m, df_s, profiles_dict
 
@@ -104,7 +112,7 @@ with st.sidebar:
             try:
                 run_query("INSERT INTO users (username, password, role) VALUES (%s, %s, %s)", (user, hashlib.sha256(pw.encode()).hexdigest(), 'user'))
                 run_query("INSERT INTO profiles (username, nickname, avatar) VALUES (%s, %s, %s) ON CONFLICT (username) DO NOTHING", (user, user, ""))
-                st.cache_data.clear() # Cache leeren, damit das neue Profil sofort verfügbar ist
+                st.cache_data.clear()
                 st.success("Erfolgreich! Logg dich jetzt ein.")
             except Exception: st.error("Name schon vergeben!")
         elif choice == "Login" and st.button("Login"):
@@ -124,7 +132,6 @@ st.markdown("<p class='sub-title'>High-End Büro-Basketball Analytics (Powered b
 
 if st.session_state['logged_in']:
     
-    # DATEN SCHNELL AUS DEM RAM LADEN (Dank @st.cache_data)
     df_matches, df_scores, profiles_dict = load_all_data()
     
     df_all = pd.DataFrame()
@@ -144,7 +151,7 @@ if st.session_state['logged_in']:
                 p1 = row1['player_name']
                 
                 if p1 not in p_stats:
-                    p_stats[p1] = {'hits': 0, 'wins': 0, 'bonus': 0, 'games': 0, 'pts': 0, 'shots': 0, 'no_scores': 0}
+                    p_stats[p1] = {'hits': 0, 'wins': 0, 'bonus': 0, 'games': 0, 'pts': 0, 'shots': 0, 'no_scores': 0, 'matches': []}
                 p_stats[p1]['hits'] += row1['hits']
                 p_stats[p1]['bonus'] += max(0, row1['pts'] - row1['hits'])
                 p_stats[p1]['games'] += 1
@@ -152,6 +159,16 @@ if st.session_state['logged_in']:
                 p_stats[p1]['shots'] += row1['shots']
                 if row1['pts'] == 0: p_stats[p1]['no_scores'] += 1
                 if p1 in winners: p_stats[p1]['wins'] += (1 / len(winners))
+                
+                # Speichere Match-Details für den Werdegang
+                opponents = [p for p in group['player_name'] if p != p1]
+                p_stats[p1]['matches'].append({
+                    'match_id': m_id,
+                    'date': row1['date'],
+                    'pts': row1['pts'],
+                    'is_win': p1 in winners,
+                    'opponents': opponents
+                })
 
                 if p1 not in h2h: h2h[p1] = {}
                 for j, row2 in group.iterrows():
@@ -185,14 +202,18 @@ if st.session_state['logged_in']:
 
         highlights = []
         for p, d in p_stats.items():
-            # Turbo: Spitzname aus dem RAM laden, anstatt die Datenbank anzufragen!
-            nick = profiles_dict.get(p, p)
-            if not nick: nick = p
+            nick = profiles_dict.get(p, {}).get('nickname', p) if profiles_dict.get(p, {}).get('nickname', p) else p
             
-            if (int(d['hits']) // 50) * 50 > 0 and (d['hits'] % 50) <= 15: 
-                highlights.append(f"🎯 **Meilenstein erreicht!** {nick} hat die legendäre **{(int(d['hits']) // 50) * 50}-Treffer-Marke** durchbrochen!")
-            if (int(d['games']) // 25) * 25 > 0 and (d['games'] % 25) <= 3:
-                highlights.append(f"🏟️ **Jubiläum!** {nick} absolvierte soeben sein **{(int(d['games']) // 25) * 25}. Match**!")
+            # Finde die Daten für die Meilensteine
+            if d['hits'] > 0:
+                # Vereinfachte Annahme für das Datum des Meilensteins: Das letzte Match
+                last_match_date = format_date_eu(d['matches'][-1]['date']) if d['matches'] else "Unbekannt"
+                if (int(d['hits']) // 50) * 50 > 0 and (d['hits'] % 50) <= 15: 
+                    highlights.append(f"🎯 **Meilenstein erreicht!** am {last_match_date}: {nick} hat die legendäre **{(int(d['hits']) // 50) * 50}-Treffer-Marke** durchbrochen!")
+            if d['games'] > 0:
+                last_match_date = format_date_eu(d['matches'][-1]['date']) if d['matches'] else "Unbekannt"
+                if (int(d['games']) // 25) * 25 > 0 and (d['games'] % 25) <= 3:
+                    highlights.append(f"🏟️ **Jubiläum!** am {last_match_date}: {nick} absolvierte soeben sein **{(int(d['games']) // 25) * 25}. Match**!")
 
         if highlights:
             for h in random.sample(highlights, min(2, len(highlights))):
@@ -204,7 +225,12 @@ if st.session_state['logged_in']:
         c3.metric("🔥 Letztes Match", format_date_eu(df_all.iloc[-1]['date']))
         st.divider()
 
-    tabs = st.tabs(["📊 Leaderboard & Records", "👤 Pro Player Profile", "📈 Vergleich", "📝 Court (Neues Match)", "⚙️ Admin & Import"])
+    # Tabs dynamisch aufbauen basierend auf Rolle
+    tab_names = ["📊 Leaderboard & Records", "👤 Pro Player Profile", "📈 Vergleich", "📝 Court (Neues Match)", "🏋️ Trainingsbereich"]
+    if st.session_state['role'] == 'admin':
+        tab_names.append("⚙️ Admin & Import")
+        
+    tabs = st.tabs(tab_names)
     
     # ---------------- 1. LEADERBOARD ----------------
     with tabs[0]:
@@ -227,8 +253,9 @@ if st.session_state['logged_in']:
                         if p in winners: sub_stats[p]['wins'] += (1 / len(winners))
                 lst = []
                 for p, d in sub_stats.items():
+                    nick = profiles_dict.get(p, {}).get('nickname', p)
                     lst.append({
-                        'Spieler': profiles_dict.get(p, p) if profiles_dict.get(p, p) else p, # Zeige Spitzname an falls vorhanden
+                        'Spieler': nick if nick else p,
                         'Spiele': d['games'], 'Siege': round(d['wins'], 1),
                         'Siegquote (%)': round((d['wins']/d['games'])*100 if d['games']>0 else 0, 1),
                         'Trefferquote (%)': round((d['hits']/d['shots'])*100 if d['shots']>0 else 0, 1),
@@ -244,12 +271,14 @@ if st.session_state['logged_in']:
             st.divider()
             st.subheader("🔥 Streaks & Rekorde")
             
-            c_s1, c_s2 = st.columns(2)
+            c_s1, c_s2, c_s3 = st.columns(3)
             with c_s1:
                 st.markdown("<div class='record-card'><h4>🔥 Aktuelle Top Streaks</h4>", unsafe_allow_html=True)
                 active_streaks = sorted([(p, d) for p, d in streaks.items() if d['type'] == 'W' and d['len'] > 1], key=lambda x: x[1]['len'], reverse=True)
                 if active_streaks:
-                    for p, d in active_streaks[:3]: st.markdown(f"<p><b>{profiles_dict.get(p, p)}</b>: {d['len']} Siege in Folge</p>", unsafe_allow_html=True)
+                    for p, d in active_streaks[:3]: 
+                        nick = profiles_dict.get(p, {}).get('nickname', p) or p
+                        st.markdown(f"<p><b>{nick}</b>: {d['len']} Siege in Folge</p>", unsafe_allow_html=True)
                 else: st.markdown("<p>Aktuell keine aktiven Siegesserien.</p>", unsafe_allow_html=True)
                 st.markdown("</div>", unsafe_allow_html=True)
             with c_s2:
@@ -257,7 +286,28 @@ if st.session_state['logged_in']:
                 top_streaks = sorted([(p, d) for p, d in streaks.items() if d['max_W'] > 0], key=lambda x: x[1]['max_W'], reverse=True)[:3]
                 for p, d in top_streaks:
                     brk = f"(Beendet von {d['max_W_breaker']})" if d['max_W_breaker'] else "(Noch Aktiv!)"
-                    st.markdown(f"<p><b>{profiles_dict.get(p, p)}</b>: {d['max_W']} Siege {brk}</p>", unsafe_allow_html=True)
+                    nick = profiles_dict.get(p, {}).get('nickname', p) or p
+                    st.markdown(f"<p><b>{nick}</b>: {d['max_W']} Siege {brk}</p>", unsafe_allow_html=True)
+                st.markdown("</div>", unsafe_allow_html=True)
+            with c_s3:
+                st.markdown("<div class='record-card'><h4>⭐ All-Time Rekorde</h4>", unsafe_allow_html=True)
+                if not df_all.empty:
+                    # Längstes Match (meiste Gesamtwürfe)
+                    match_shots = df_all.groupby('match_id')['shots'].sum()
+                    longest_match_id = match_shots.idxmax()
+                    longest_match_shots = match_shots.max()
+                    st.markdown(f"<p><b>Längstes Match:</b> M{longest_match_id:02d} ({longest_match_shots} Gesamtwürfe)</p>", unsafe_allow_html=True)
+                    
+                    # Meiste Treffer Spieler in einem Match
+                    max_hits_row = df_all.loc[df_all['hits'].idxmax()]
+                    nick_hits = profiles_dict.get(max_hits_row['player_name'], {}).get('nickname', max_hits_row['player_name']) or max_hits_row['player_name']
+                    st.markdown(f"<p><b>Meiste Treffer (Spieler):</b> {nick_hits} ({max_hits_row['hits']} Treffer in M{max_hits_row['match_id']:02d})</p>", unsafe_allow_html=True)
+                    
+                    # Punktereichstes Spiel (Summe aller Punkte)
+                    match_pts = df_all.groupby('match_id')['pts'].sum()
+                    max_pts_match_id = match_pts.idxmax()
+                    max_pts_match_val = match_pts.max()
+                    st.markdown(f"<p><b>Punktereichstes Spiel:</b> M{max_pts_match_id:02d} ({max_pts_match_val} Punkte gesamt)</p>", unsafe_allow_html=True)
                 st.markdown("</div>", unsafe_allow_html=True)
 
             st.divider()
@@ -267,7 +317,7 @@ if st.session_state['logged_in']:
             hist_rows = []
             for m_id, group in df_all.groupby('match_id'):
                 date_val = group['date'].iloc[0]
-                players_str = ", ".join([f"{profiles_dict.get(r['player_name'], r['player_name'])} ({int(r['pts'])} Pkt, {int(r['hits'])} Tr)" for _, r in group.iterrows()])
+                players_str = ", ".join([f"{profiles_dict.get(r['player_name'], {}).get('nickname', r['player_name']) or r['player_name']} ({int(r['pts'])} Pkt, {int(r['hits'])} Tr)" for _, r in group.iterrows()])
                 hist_rows.append({'Match-ID': int(m_id), 'Datum_raw': date_val, 'Datum': format_date_eu(date_val), 'Modus': group['mode'].iloc[0], 'Ergebnis': players_str})
             
             if hist_rows:
@@ -279,10 +329,37 @@ if st.session_state['logged_in']:
     with tabs[1]:
         st.subheader("👤 Pro Player Profile & Analytics")
         if not df_all.empty and p_stats:
+            
+            # Profil bearbeiten Toggle
+            edit_mode = st.toggle("✏️ Profil bearbeiten")
+            
             selected_player = st.selectbox("Wähle einen Athleten aus:", list(p_stats.keys()))
             
-            nickname = profiles_dict.get(selected_player, selected_player)
+            nickname = profiles_dict.get(selected_player, {}).get('nickname', selected_player)
             if not nickname: nickname = selected_player
+            avatar_file = profiles_dict.get(selected_player, {}).get('avatar', '')
+            
+            if edit_mode and selected_player == st.session_state['username']:
+                with st.expander("Profil-Einstellungen", expanded=True):
+                    new_nick = st.text_input("Spitzname", value=nickname)
+                    new_avatar = st.file_uploader("Profilbild hochladen (PNG, JPG)", type=['png', 'jpg', 'jpeg'])
+                    if st.button("Profil speichern"):
+                        avatar_path = avatar_file
+                        if new_avatar:
+                            avatar_path = os.path.join(UPLOAD_DIR, f"{selected_player}_{new_avatar.name}")
+                            with open(avatar_path, "wb") as f:
+                                f.write(new_avatar.getbuffer())
+                        
+                        conn = psycopg2.connect(DB_URL)
+                        cur = conn.cursor()
+                        cur.execute("INSERT INTO profiles (username, nickname, avatar) VALUES (%s, %s, %s) ON CONFLICT (username) DO UPDATE SET nickname = EXCLUDED.nickname, avatar = EXCLUDED.avatar", (selected_player, new_nick, avatar_path))
+                        conn.commit()
+                        conn.close()
+                        st.cache_data.clear()
+                        st.success("Profil aktualisiert!")
+                        st.rerun()
+            elif edit_mode:
+                st.warning("Du kannst nur dein eigenes Profil bearbeiten.")
             
             player_matches = df_all[df_all['player_name'] == selected_player].sort_values(by=['date', 'match_id']).reset_index(drop=True)
             hist_data, current_form_val, hist_avg_rate, form_str = [], 0, 0, ""
@@ -300,8 +377,10 @@ if st.session_state['logged_in']:
                 if selected_player in h2h and h2h[selected_player]:
                     opp_l = max(h2h[selected_player].items(), key=lambda x: x[1]['L'])
                     opp_w = max(h2h[selected_player].items(), key=lambda x: x[1]['W'])
-                    if opp_l[1]['L'] > 0: nemesis = f"{profiles_dict.get(opp_l[0], opp_l[0])} ({opp_l[1]['L']} Niederlagen)"
-                    if opp_w[1]['W'] > 0: favorite = f"{profiles_dict.get(opp_w[0], opp_w[0])} ({opp_w[1]['W']} Siege)"
+                    nick_l = profiles_dict.get(opp_l[0], {}).get('nickname', opp_l[0]) or opp_l[0]
+                    nick_w = profiles_dict.get(opp_w[0], {}).get('nickname', opp_w[0]) or opp_w[0]
+                    if opp_l[1]['L'] > 0: nemesis = f"{nick_l} ({opp_l[1]['L']} Niederlagen)"
+                    if opp_w[1]['W'] > 0: favorite = f"{nick_w} ({opp_w[1]['W']} Siege)"
 
                 for idx, row in player_matches.iterrows():
                     hist_data.append({'Match': f"M{idx+1:02d}", 'pts': row['pts'], 'hits': row['hits'], 'shots': row['shots'], 'bonus': max(0, row['pts']-row['hits'])})
@@ -316,29 +395,87 @@ if st.session_state['logged_in']:
                 current_form_val = df_hist.iloc[-1]['Form-Index (%)']
                 form_str = "🔥 ON FIRE" if current_form_val >= hit_rate else "🧊 COLD STREAK"
 
-                st.markdown(f"""
-                <div class='pro-card-container'>
-                    <div style='display: flex; justify-content: space-between; align-items: center;'>
-                        <div>
-                            <h1 style='margin: 0; font-size: 3rem; font-family: Impact;'>{nickname}</h1>
-                            <p style='color: #FF5722; font-weight: bold; margin: 0;'>{form_str} (Form: {current_form_val:.1f}%)</p>
+                # Layout: Links Profilkarte, Rechts Werdegang
+                col_profile, col_timeline = st.columns([2, 1])
+                
+                with col_profile:
+                    avatar_html = ""
+                    if avatar_file and os.path.exists(avatar_file):
+                        # Simple base64 encoding for local image to display in markdown if needed, 
+                        # but using st.image is safer. We'll stick to a compact layout.
+                        pass # handled below via st.image if we want, but standard markdown is tricky with local files without b64
+
+                    st.markdown(f"""
+                    <div class='pro-card-container'>
+                        <div style='display: flex; justify-content: space-between; align-items: center;'>
+                            <div>
+                                <h1 style='margin: 0; font-size: 2.5rem; font-family: Impact;'>{nickname}</h1>
+                                <p style='color: #FF5722; font-weight: bold; margin: 0;'>{form_str} (Form: {current_form_val:.1f}%)</p>
+                            </div>
+                            <div><div class='pro-stat-label' style='margin-bottom:5px;'>Letzte 5 Spiele</div><div>{form_html}</div></div>
                         </div>
-                        <div><div class='pro-stat-label' style='margin-bottom:5px;'>Letzte 5 Spiele</div><div>{form_html}</div></div>
-                    </div>
-                    <div class='pro-card-stats'>
-                        <div><div class='pro-stat-val'>{win_rate:.1f}%</div><div class='pro-stat-label'>Siegquote</div></div>
-                        <div><div class='pro-stat-val'>{avg_pts:.1f}</div><div class='pro-stat-label'>Ø Punkte</div></div>
-                        <div><div class='pro-stat-val'>{hit_rate:.1f}%</div><div class='pro-stat-label'>Trefferquote</div></div>
-                        <div><div class='pro-stat-val'>{bonus_rate:.1f}%</div><div class='pro-stat-label'>Trash-Bonus Quote</div></div>
-                        <div><div class='pro-stat-val'>{int(d['games'])}</div><div class='pro-stat-label'>Matches</div></div>
-                    </div>
-                    <hr style='border-color: #334155;'>
-                    <div style='display: flex; justify-content: space-around;'>
-                        <div><span class='pro-stat-label'>Erzrivale:</span> <b>{nemesis}</b></div>
-                        <div><span class='pro-stat-label'>Lieblingsgegner:</span> <b>{favorite}</b></div>
-                    </div>
-                </div><br>
-                """, unsafe_allow_html=True)
+                        <div class='pro-card-stats'>
+                            <div><div class='pro-stat-val'>{win_rate:.1f}%</div><div class='pro-stat-label'>Siegquote</div></div>
+                            <div><div class='pro-stat-val'>{avg_pts:.1f}</div><div class='pro-stat-label'>Ø Punkte</div></div>
+                            <div><div class='pro-stat-val'>{hit_rate:.1f}%</div><div class='pro-stat-label'>Trefferquote</div></div>
+                            <div><div class='pro-stat-val'>{bonus_rate:.1f}%</div><div class='pro-stat-label'>Trash-Bonus Quote</div></div>
+                            <div><div class='pro-stat-val'>{int(d['games'])}</div><div class='pro-stat-label'>Matches</div></div>
+                        </div>
+                        <hr style='border-color: #334155; margin: 15px 0;'>
+                        <div style='display: flex; justify-content: space-around; font-size: 0.9em;'>
+                            <div><span class='pro-stat-label'>Erzrivale:</span> <b>{nemesis}</b></div>
+                            <div><span class='pro-stat-label'>Lieblingsgegner:</span> <b>{favorite}</b></div>
+                        </div>
+                    </div><br>
+                    """, unsafe_allow_html=True)
+                    if avatar_file and os.path.exists(avatar_file):
+                        st.image(avatar_file, width=150)
+                
+                with col_timeline:
+                    st.markdown("### 🗺️ Persönlicher Werdegang")
+                    
+                    # Generiere Meilensteine
+                    milestones = []
+                    p_m = d['matches']
+                    if p_m:
+                        # Erstes Match
+                        m1 = p_m[0]
+                        opp_str = ", ".join([profiles_dict.get(op, {}).get('nickname', op) or op for op in m1['opponents']])
+                        milestones.append({'match_idx': 1, 'title': '1. Match', 'date': m1['date'], 'desc': f"Gegen {opp_str} ({m1['pts']} Pkt)"})
+                        
+                        # Erster Sieg
+                        first_win = next((m for m in p_m if m['is_win']), None)
+                        if first_win:
+                            idx = p_m.index(first_win) + 1
+                            opp_str = ", ".join([profiles_dict.get(op, {}).get('nickname', op) or op for op in first_win['opponents']])
+                            milestones.append({'match_idx': idx, 'title': '1. Sieg', 'date': first_win['date'], 'desc': f"Gegen {opp_str} ({first_win['pts']} Pkt)"})
+                        
+                        # 50. Match
+                        if len(p_m) >= 50:
+                            m50 = p_m[49]
+                            opp_str = ", ".join([profiles_dict.get(op, {}).get('nickname', op) or op for op in m50['opponents']])
+                            milestones.append({'match_idx': 50, 'title': '50. Match', 'date': m50['date'], 'desc': f"Gegen {opp_str} ({m50['pts']} Pkt)"})
+                        
+                        # 100. Match
+                        if len(p_m) >= 100:
+                            m100 = p_m[99]
+                            opp_str = ", ".join([profiles_dict.get(op, {}).get('nickname', op) or op for op in m100['opponents']])
+                            milestones.append({'match_idx': 100, 'title': '100. Match', 'date': m100['date'], 'desc': f"Gegen {opp_str} ({m100['pts']} Pkt)"})
+
+                    # Sortieren und anzeigen
+                    milestones.sort(key=lambda x: x['match_idx'])
+                    
+                    timeline_html = "<div class='timeline-container'>"
+                    for ms in milestones:
+                        timeline_html += f"""
+                        <div class='timeline-item'>
+                            <div class='timeline-date'>{format_date_eu(ms['date'])} (M{ms['match_idx']})</div>
+                            <div class='timeline-content'>{ms['title']}</div>
+                            <div style='font-size: 0.85em; color: #cbd5e1;'>{ms['desc']}</div>
+                        </div>
+                        """
+                    timeline_html += "</div>"
+                    st.markdown(timeline_html, unsafe_allow_html=True)
                 
                 c_ch1, c_ch2 = st.columns(2)
                 with c_ch1:
@@ -356,7 +493,13 @@ if st.session_state['logged_in']:
         st.subheader("📈 Spieler-Vergleich")
         if not df_all.empty:
             all_players = df_all['player_name'].unique().tolist()
-            comp_players = st.multiselect("Wähle Spieler zum Vergleichen:", all_players, default=all_players[:2] if len(all_players)>1 else all_players)
+            # Formatiere Namen für Multiselect
+            display_names = {p: profiles_dict.get(p, {}).get('nickname', p) or p for p in all_players}
+            
+            comp_players_display = st.multiselect("Wähle Spieler zum Vergleichen:", list(display_names.values()), default=list(display_names.values())[:2] if len(display_names)>1 else list(display_names.values()))
+            
+            # Map back to usernames
+            comp_players = [k for k, v in display_names.items() if v in comp_players_display]
             
             if comp_players:
                 comp_data = []
@@ -366,7 +509,8 @@ if st.session_state['logged_in']:
                     for idx, r in p_matches.iterrows():
                         cum_hits += r['hits']
                         cum_shots += r['shots']
-                        comp_data.append({'Match-Nr.': idx+1, 'Spieler': profiles_dict.get(p, p), 'Kumulierte Trefferquote (%)': (cum_hits/cum_shots)*100 if cum_shots>0 else 0})
+                        nick = profiles_dict.get(p, {}).get('nickname', p) or p
+                        comp_data.append({'Match-Nr.': idx+1, 'Spieler': nick, 'Kumulierte Trefferquote (%)': (cum_hits/cum_shots)*100 if cum_shots>0 else 0})
                 
                 df_comp = pd.DataFrame(comp_data)
                 if not df_comp.empty:
@@ -390,33 +534,37 @@ if st.session_state['logged_in']:
         existing_players = sorted(df_all['player_name'].unique().tolist()) if not df_all.empty else []
         options = existing_players + ["➕ Neuer Spieler"]
 
+        # --- RICHTIGER MATCH EINTRAG (Schnell durch Cache) ---
         players_data = []
         for i in range(st.session_state.match_players_count):
             with st.container(border=True):
                 st.markdown(f"#### 🏀 Spieler {i+1}")
                 
                 default_idx = existing_players.index(st.session_state['username']) if (i == 0 and st.session_state['username'] in existing_players) else 0
-                sel = st.selectbox(f"Name (Spieler {i+1})", options, index=default_idx if options else 0, key=f"sel_{i}")
+                sel = st.selectbox(f"Name (Spieler {i+1})", options, index=default_idx if options else 0, key=f"sel_real_{i}")
                 
-                p_name = st.text_input("Name eingeben:", key=f"newp_{i}") if sel == "➕ Neuer Spieler" else sel
+                p_name = st.text_input("Name eingeben:", key=f"newp_real_{i}") if sel == "➕ Neuer Spieler" else sel
                 
-                use_detailed = st.toggle("🎯 Wurf für Wurf eintragen", key=f"det_{i}")
+                use_detailed = st.toggle("🎯 Wurf für Wurf eintragen", key=f"det_real_{i}")
                 shots_val, hits_val, pts_val, shot_array = 10, 0, 0, []
                 
                 if use_detailed:
                     cols = st.columns(10)
                     for s in range(10):
-                        res = cols[s].selectbox("Wurf", ["❌", "🏀", "🗑️"], index=None, placeholder=f"{s+1}. Wurf", key=f"w_{i}_{s}", label_visibility="collapsed")
+                        res = cols[s].selectbox("Wurf", ["❌", "🏀", "🗑️"], index=None, placeholder=f"{s+1}. Wurf", key=f"w_real_{i}_{s}", label_visibility="collapsed")
                         shot_array.append(res)
                     reg_hits = sum(1 for x in shot_array if x in ["🏀", "🗑️"])
                     reg_bonus = sum(1 for x in shot_array if x == "🗑️")
                 else:
                     c_a, c_b = st.columns(2)
-                    reg_hits = c_a.number_input("Treffer (max 10)", min_value=0, max_value=10, key=f"rh_{i}")
-                    reg_bonus = c_b.number_input("Davon Mülleimer 🗑️", min_value=0, max_value=int(reg_hits), key=f"rb_{i}")
+                    reg_hits = c_a.number_input("Treffer (max 10)", min_value=0, max_value=10, key=f"rh_real_{i}")
+                    reg_bonus = c_b.number_input("Davon Mülleimer 🗑️", min_value=0, max_value=int(reg_hits), key=f"rb_real_{i}")
                 
                 hits_val += reg_hits; pts_val += (reg_hits + reg_bonus)
                 players_data.append({'name': p_name, 'shots': shots_val, 'hits': hits_val, 'pts': pts_val, 'shot_data': str(shot_array), 'use_det': use_detailed})
+                
+                # Punktestand Live anzeigen
+                st.info(f"📊 Aktueller Punktestand: **{pts_val} Punkte** ({hits_val} Treffer)")
 
         st.divider()
         
@@ -434,26 +582,32 @@ if st.session_state['logged_in']:
             for i in tied_players:
                 with st.container(border=True):
                     st.markdown(f"#### 🏀 {players_data[i]['name']}")
-                    st.info(f"📊 Aktueller Gesamt-Punktestand: **{players_data[i]['pts']} Punkte**")
+                    st.info(f"📊 Gesamt-Punkte vor dieser OT: **{players_data[i]['pts']} Punkte**")
                     
                     use_det_ot = st.toggle(f"🎯 Detail-Eingabe (OT {ot_round})", value=players_data[i]['use_det'], key=f"det_ot_{i}_{ot_round}")
+                    
+                    # Richtig hochzählen für OT Würfe
+                    start_shot = 10 + ((ot_round - 1) * 3)
                     
                     if use_det_ot:
                         cols = st.columns(3)
                         ot_shots = []
                         for s in range(3):
-                            res = cols[s].selectbox("Wurf", ["❌", "🏀", "🗑️"], index=None, placeholder=f"{s+1}. Wurf", key=f"w_ot_{i}_{ot_round}_{s}", label_visibility="collapsed")
+                            shot_num = start_shot + s + 1
+                            res = cols[s].selectbox(f"Wurf {shot_num}", ["❌", "🏀", "🗑️"], index=None, placeholder=f"{shot_num}. Wurf", key=f"w_ot_{i}_{ot_round}_{s}")
                             ot_shots.append(res)
                         reg_hits = sum(1 for x in ot_shots if x in ["🏀", "🗑️"])
                         reg_bonus = sum(1 for x in ot_shots if x == "🗑️")
                     else:
                         c1, c2 = st.columns(2)
-                        reg_hits = c1.number_input(f"OT Treffer", min_value=0, max_value=3, key=f"oth_{i}_{ot_round}")
+                        reg_hits = c1.number_input(f"OT Treffer (Würfe {start_shot+1}-{start_shot+3})", min_value=0, max_value=3, key=f"oth_{i}_{ot_round}")
                         reg_bonus = c2.number_input(f"OT Bonus", min_value=0, max_value=int(reg_hits), key=f"otb_{i}_{ot_round}")
                     
                     players_data[i]['hits'] += reg_hits
                     players_data[i]['pts'] += (reg_hits + reg_bonus)
                     players_data[i]['shots'] += 3
+                    
+                    st.info(f"📊 Neuer Punktestand inkl. OT {ot_round}: **{players_data[i]['pts']} Punkte**")
 
             current_pts = [players_data[i]['pts'] for i in tied_players]
             max_ot_pts = max(current_pts) if current_pts else 0
@@ -480,25 +634,78 @@ if st.session_state['logged_in']:
                     cur.execute("INSERT INTO match_scores (match_id, player_name, shots, hits, pts, shot_data) VALUES (%s, %s, %s, %s, %s, %s)", (m_id, p['name'], p['shots'], p['hits'], p['pts'], p['shot_data']))
                 conn.commit()
                 conn.close()
-                st.cache_data.clear() # CACHE LEEREN, damit das neue Match direkt im Leaderboard sichtbar ist!
+                st.cache_data.clear() # CACHE LEEREN!
                 st.balloons()
                 st.success("Match heldenhaft gespeichert!")
                 st.session_state.match_players_count = 2
                 st.rerun()
-
-    # ---------------- 5. ADMIN & IMPORT / EXPORT ----------------
+                
+    # ---------------- NEU: 5. TRAININGSBEREICH ----------------
     with tabs[4]:
-        if st.session_state['role'] == 'admin':
+        st.subheader("🏋️ Individueller Trainingsbereich")
+        st.write("Trainiere deine Würfe, wenn mal kein Gegner da ist. Diese Daten fließen **nicht** in das offizielle Leaderboard ein und sind nur für dich sichtbar.")
+        
+        current_user = st.session_state['username']
+        
+        c1, c2 = st.columns([1, 2])
+        with c1:
+            st.markdown("### Neues Training eintragen")
+            t_shots = st.number_input("Anzahl Trainingswürfe", min_value=1, value=10, step=1)
+            t_hits = st.number_input("Davon Treffer", min_value=0, max_value=int(t_shots), value=0)
+            t_bonus = st.number_input("Davon Mülleimer (Bonus)", min_value=0, max_value=int(t_hits), value=0)
+            t_notes = st.text_area("Notizen (z.B. 'Nur linke Hand')")
+            
+            if st.button("Training speichern", type="primary"):
+                conn = psycopg2.connect(DB_URL)
+                cur = conn.cursor()
+                cur.execute("INSERT INTO training_sessions (username, date, shots, hits, bonus, notes) VALUES (%s, %s, %s, %s, %s, %s)",
+                            (current_user, str(date.today()), t_shots, t_hits, t_bonus, t_notes))
+                conn.commit()
+                conn.close()
+                st.success("Training gespeichert!")
+                st.rerun()
+                
+        with c2:
+            st.markdown("### Deine Trainingshistorie")
+            trainings = run_query("SELECT date, shots, hits, bonus, notes FROM training_sessions WHERE username=%s ORDER BY id DESC", (current_user,))
+            if trainings:
+                t_data = []
+                cum_t_shots = 0
+                cum_t_hits = 0
+                for t in trainings[::-1]: # reverse to calculate cumulative correctly
+                    cum_t_shots += t[1]
+                    cum_t_hits += t[2]
+                
+                for t in trainings:
+                    quote = (t[2] / t[1] * 100) if t[1] > 0 else 0
+                    t_data.append({
+                        "Datum": format_date_eu(t[0]),
+                        "Treffer / Würfe": f"{t[2]} / {t[1]}",
+                        "Quote": f"{quote:.1f}%",
+                        "Bonus": t[3],
+                        "Notizen": t[4]
+                    })
+                
+                df_train = pd.DataFrame(t_data)
+                st.dataframe(df_train, use_container_width=True, hide_index=True)
+                
+                if cum_t_shots > 0:
+                    st.info(f"**Deine All-Time Trainingsquote:** {(cum_t_hits/cum_t_shots*100):.1f}% ({cum_t_hits} Treffer bei {cum_t_shots} Würfen)")
+            else:
+                st.info("Du hast noch keine Trainings absolviert. Zeit, ein paar Körbe zu werfen!")
+
+    # ---------------- 6. ADMIN & IMPORT / EXPORT ----------------
+    if st.session_state['role'] == 'admin':
+        with tabs[5]:
             st.subheader("🛠️ Admin-Bereich & Datenbank-Management")
             
             if not df_all.empty:
                 st.markdown("### 💾 Backup Exportieren")
-                st.write("Lade hier deine Datenbank herunter, bevor du etwas änderst!")
                 csv = df_all.to_csv(index=False).encode('utf-8')
                 st.download_button("📥 Aktuelle Datenbank als CSV herunterladen", data=csv, file_name="office_hoops_backup.csv", mime="text/csv")
                 st.divider()
 
-            st.markdown("### 📥 Excel-Import (1v1, 3er & 4er Matches - Chronologisch sortiert)")
+            st.markdown("### 📥 Excel-Import (1v1, 3er & 4er Matches)")
             uploaded_file = st.file_uploader("Slam Dunk Scoresheet.xlsx", type=["xlsx"])
             if uploaded_file and st.button("⚡ Daten importieren"):
                 with st.spinner("Importiere und sortiere alle Matches chronologisch..."):
@@ -506,7 +713,6 @@ if st.session_state['logged_in']:
                     
                     import_list = []
                     
-                    # 1v1
                     if 'Datum' in df_excel.columns and 'Spieler 1' in df_excel.columns and 'Spieler 2' in df_excel.columns:
                         df_2er = df_excel[['Datum', 'Spieler 1', 'Spieler 2', 'Würfe', 'Punkte SP1', 'Punkte SP2', 'Treffer SP1', 'Treffer SP2']].dropna(subset=['Spieler 1', 'Spieler 2'])
                         for _, r in df_2er.iterrows():
@@ -520,7 +726,6 @@ if st.session_state['logged_in']:
                                 ]
                             })
 
-                    # 3er
                     col_d3 = 'Datum.1' if 'Datum.1' in df_excel.columns else 'Datum'
                     if col_d3 in df_excel.columns and 'Spieler 1.1' in df_excel.columns and 'Spieler 2.1' in df_excel.columns and 'Spieler 3' in df_excel.columns:
                         df_3er = df_excel.dropna(subset=['Spieler 1.1', 'Spieler 2.1', 'Spieler 3'])
@@ -539,7 +744,6 @@ if st.session_state['logged_in']:
                                 ]
                             })
 
-                    # 4er
                     col_d4 = 'Datum.2' if 'Datum.2' in df_excel.columns else 'Datum'
                     if col_d4 in df_excel.columns and 'Spieler 1.2' in df_excel.columns and 'Spieler 2.2' in df_excel.columns:
                         df_4er = df_excel.dropna(subset=['Spieler 1.2', 'Spieler 2.2'])
@@ -572,12 +776,12 @@ if st.session_state['logged_in']:
                     
                     conn.commit()
                     conn.close()
-                    st.cache_data.clear() # CACHE LEEREN, damit die importierten Matches sofort sichtbar sind
+                    st.cache_data.clear() 
                     st.success(f"Import erfolgreich! {new_count} Matches eingelesen.")
                     st.rerun()
 
             st.divider()
-            st.markdown("### 🧨 DANGER ZONE (Datenbank löschen)")
+            st.markdown("### 🧨 DANGER ZONE")
             if st.checkbox("Ich bin mir sicher, dass ich alle Matches unwiderruflich löschen möchte."):
                 if st.button("🚨 GESAMTE MATCH-DATENBANK ZURÜCKSETZEN 🚨"):
                     conn = psycopg2.connect(DB_URL)
@@ -587,7 +791,7 @@ if st.session_state['logged_in']:
                     conn.commit()
                     conn.close()
                     init_db()
-                    st.cache_data.clear() # CACHE LEEREN, damit die App weiß, dass alles gelöscht wurde
+                    st.cache_data.clear()
                     st.success("Tabelle erfolgreich gelöscht!")
                     st.rerun()
 else:
