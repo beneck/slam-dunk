@@ -395,14 +395,21 @@ if st.session_state['logged_in']:
 
                 col_profile, col_timeline = st.columns([2, 1])
                 
-                with col_profile:
-                    # Profilbild als Base64 in HTML einbetten
-                    b64_img = ""
-                    if avatar_file and os.path.exists(avatar_file):
-                        with open(avatar_file, "rb") as img_file:
-                            b64_img = base64.b64encode(img_file.read()).decode()
+with col_profile:
+                    # Profilbild laden oder schicken Standard-Avatar verwenden
+                    avatar_path = avatar_file if (avatar_file and os.path.exists(avatar_file)) else ""
                     
-                    img_tag = f"<img src='data:image/png;base64,{b64_img}' style='width: 90px; height: 90px; border-radius: 50%; object-fit: cover; margin-right: 20px; border: 3px solid #FF5722;'>" if b64_img else ""
+                    b64_img = ""
+                    if avatar_path:
+                        with open(avatar_path, "rb") as img_file:
+                            b64_img = base64.b64encode(img_file.read()).decode()
+                    else:
+                        # Schöner Standard-Avatar (Basketball-Icon als Fallback)
+                        b64_img = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" # Platzhalter, wir nutzen direkt eine URL:
+                    
+                    # Nutzen wir direkt eine saubere Bild-URL als Standard-Avatar wenn keins da ist
+                    img_src = f"data:image/png;base64,{b64_img}" if avatar_path else "https://cdn-icons-png.flaticon.com/512/889/889442.png"
+                    img_tag = f"<img src='{img_src}' style='width: 90px; height: 90px; border-radius: 50%; object-fit: cover; margin-right: 20px; border: 3px solid #FF5722; background-color: #334155;'>"
 
                     html_card = f"""<div class='pro-card-container'>
 <div style='display: flex; justify-content: space-between; align-items: center;'>
@@ -429,7 +436,7 @@ if st.session_state['logged_in']:
 </div>
 </div><br>"""
                     st.markdown(html_card, unsafe_allow_html=True)
-                
+    
                 with col_timeline:
                     st.markdown("### 🗺️ Karriere Highlights")
                     milestones = []
