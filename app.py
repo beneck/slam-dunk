@@ -468,8 +468,7 @@ with col_timeline:
                     for ms in milestones:
                         timeline_html += f"<div class='timeline-item'><div class='timeline-date'>{format_date_eu(ms['date'])} (M{ms['match_idx']})</div><div class='timeline-content'>{ms['title']}</div><div style='font-size: 0.85em; color: #cbd5e1;'>{ms['desc']}</div></div>"
                     timeline_html += "</div>"
-                    st.markdown(timeline_html, unsafe_allow_html=True)
-                
+                    st.markdown(timeline_html, unsafe_allow_html=True)                
                 c_ch1, c_ch2 = st.columns(2)
                 with c_ch1:
                     st.write("📈 **Trefferquote Kumuliert (All-Time):**")
