@@ -404,32 +404,31 @@ if st.session_state['logged_in']:
                     
                     img_tag = f"<img src='data:image/png;base64,{b64_img}' style='width: 90px; height: 90px; border-radius: 50%; object-fit: cover; margin-right: 20px; border: 3px solid #FF5722;'>" if b64_img else ""
 
-                    st.markdown(f"""
-                    <div class='pro-card-container'>
-                        <div style='display: flex; justify-content: space-between; align-items: center;'>
-                            <div style='display: flex; align-items: center;'>
-                                {img_tag}
-                                <div>
-                                    <h1 style='margin: 0; font-size: 2.5rem; font-family: Impact; line-height: 1;'>{nickname}</h1>
-                                    <p style='color: #FF5722; font-weight: bold; margin: 0; margin-top: 5px;'>{form_str} (Form: {current_form_val:.1f}%)</p>
-                                </div>
-                            </div>
-                            <div><div class='pro-stat-label' style='margin-bottom:5px; text-align: right;'>Letzte 5 Spiele</div><div style='text-align: right;'>{form_html}</div></div>
-                        </div>
-                        <div class='pro-card-stats'>
-                            <div><div class='pro-stat-val'>{win_rate:.1f}%</div><div class='pro-stat-label'>Siegquote</div></div>
-                            <div><div class='pro-stat-val'>{avg_pts:.1f}</div><div class='pro-stat-label'>Ø Punkte</div></div>
-                            <div><div class='pro-stat-val'>{hit_rate:.1f}%</div><div class='pro-stat-label'>Trefferquote</div></div>
-                            <div><div class='pro-stat-val'>{bonus_rate:.1f}%</div><div class='pro-stat-label'>Trash-Bonus Quote</div></div>
-                            <div><div class='pro-stat-val'>{int(d['games'])}</div><div class='pro-stat-label'>Matches</div></div>
-                        </div>
-                        <hr style='border-color: #334155; margin: 15px 0;'>
-                        <div style='display: flex; justify-content: space-around; font-size: 0.9em;'>
-                            <div><span class='pro-stat-label'>Erzrivale:</span> <b>{nemesis}</b></div>
-                            <div><span class='pro-stat-label'>Lieblingsgegner:</span> <b>{favorite}</b></div>
-                        </div>
-                    </div><br>
-                    """, unsafe_allow_html=True)
+                    html_card = f"""<div class='pro-card-container'>
+<div style='display: flex; justify-content: space-between; align-items: center;'>
+    <div style='display: flex; align-items: center;'>
+        {img_tag}
+        <div>
+            <h1 style='margin: 0; font-size: 2.5rem; font-family: Impact; line-height: 1;'>{nickname}</h1>
+            <p style='color: #FF5722; font-weight: bold; margin: 0; margin-top: 5px;'>{form_str} (Form: {current_form_val:.1f}%)</p>
+        </div>
+    </div>
+    <div><div class='pro-stat-label' style='margin-bottom:5px; text-align: right;'>Letzte 5 Spiele</div><div style='text-align: right;'>{form_html}</div></div>
+</div>
+<div class='pro-card-stats'>
+    <div><div class='pro-stat-val'>{win_rate:.1f}%</div><div class='pro-stat-label'>Siegquote</div></div>
+    <div><div class='pro-stat-val'>{avg_pts:.1f}</div><div class='pro-stat-label'>Ø Punkte</div></div>
+    <div><div class='pro-stat-val'>{hit_rate:.1f}%</div><div class='pro-stat-label'>Trefferquote</div></div>
+    <div><div class='pro-stat-val'>{bonus_rate:.1f}%</div><div class='pro-stat-label'>Trash-Bonus Quote</div></div>
+    <div><div class='pro-stat-val'>{int(d['games'])}</div><div class='pro-stat-label'>Matches</div></div>
+</div>
+<hr style='border-color: #334155; margin: 15px 0;'>
+<div style='display: flex; justify-content: space-around; font-size: 0.9em;'>
+    <div><span class='pro-stat-label'>Erzrivale:</span> <b>{nemesis}</b></div>
+    <div><span class='pro-stat-label'>Lieblingsgegner:</span> <b>{favorite}</b></div>
+</div>
+</div><br>"""
+                    st.markdown(html_card, unsafe_allow_html=True)
                 
                 with col_timeline:
                     st.markdown("### 🗺️ Karriere Highlights")
