@@ -1,17 +1,23 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
 import hashlib
 from datetime import datetime, date
 import os
 import random
+import psycopg2
 
 # --- VIBE & DESIGN ---
 st.set_page_config(page_title="Slam Dunk Tracker", page_icon="🏀", layout="wide")
 
+# Prüfen, ob DB_URL in Secrets hinterlegt ist
+if "DB_URL" not in st.secrets:
+    st.error("🚨 Datenbank-Verbindung fehlt! Bitte trage die 'DB_URL' in den Streamlit Secrets ein.")
+    st.stop()
+
+DB_URL = st.secrets["DB_URL"]
+
 st.markdown("""
     <style>
-    :root { color-scheme: dark; }
     .main-title { font-family: 'Impact', sans-serif; color: #FF5722; font-size: 3.5rem !important; text-transform: uppercase; text-shadow: 2px 2px 5px rgba(255, 87, 34, 0.4); text-align: center; margin-bottom: 5px; }
     .sub-title { text-align: center; color: #94a3b8; font-size: 1.2rem; margin-bottom: 40px; font-weight: bold; }
     div[data-testid="stMetricValue"] { color: #FF5722 !important; font-weight: 900; }
@@ -32,34 +38,31 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-DB_FILE = 'office_hoops_v2.db'
-UPLOAD_DIR = 'avatars'
-if not os.path.exists(UPLOAD_DIR): os.makedirs(UPLOAD_DIR)
-
 def init_db():
-    conn = sqlite3.connect(DB_FILE)
+    conn = psycopg2.connect(DB_URL)
     c = conn.cursor()
-    c.execute("PRAGMA table_info(matches)")
-    cols = [col[1] for col in c.fetchall()]
-    if 'player1' in cols:
-        c.execute("DROP TABLE matches")
-        c.execute("DROP TABLE IF EXISTS match_scores")
     c.execute('''CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, role TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS profiles (username TEXT PRIMARY KEY, nickname TEXT, avatar TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS matches (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, mode TEXT, is_historical BOOLEAN)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS match_scores (id INTEGER PRIMARY KEY AUTOINCREMENT, match_id INTEGER, player_name TEXT, shots INTEGER, hits INTEGER, pts REAL, shot_data TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS matches (id SERIAL PRIMARY KEY, date TEXT, mode TEXT, is_historical BOOLEAN)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS match_scores (id SERIAL PRIMARY KEY, match_id INTEGER, player_name TEXT, shots INTEGER, hits INTEGER, pts REAL, shot_data TEXT)''')
+    
     c.execute("SELECT * FROM users WHERE username='Admin'")
-    if not c.fetchone(): c.execute("INSERT INTO users VALUES (?, ?, ?)", ('Admin', hashlib.sha256(b'admin123').hexdigest(), 'admin'))
+    if not c.fetchone():
+        c.execute("INSERT INTO users (username, password, role) VALUES (%s, %s, %s)", ('Admin', hashlib.sha256(b'admin123').hexdigest(), 'admin'))
+    
     conn.commit()
     conn.close()
 
-
 def run_query(query, params=()):
-    conn = sqlite3.connect(DB_FILE)
+    conn = psycopg2.connect(DB_URL)
     c = conn.cursor()
     c.execute(query, params)
     conn.commit()
-    data = c.fetchall()
+    data = None
+    try:
+        data = c.fetchall()
+    except Exception:
+        pass
     conn.close()
     return data
 
@@ -84,12 +87,12 @@ with st.sidebar:
         pw = st.text_input("Passwort", type='password')
         if choice == "Registrieren" and st.button("Account anlegen"):
             try:
-                run_query("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", (user, hashlib.sha256(pw.encode()).hexdigest(), 'user'))
-                run_query("INSERT OR IGNORE INTO profiles (username, nickname, avatar) VALUES (?, ?, ?)", (user, user, ""))
+                run_query("INSERT INTO users (username, password, role) VALUES (%s, %s, %s)", (user, hashlib.sha256(pw.encode()).hexdigest(), 'user'))
+                run_query("INSERT INTO profiles (username, nickname, avatar) VALUES (%s, %s, %s) ON CONFLICT (username) DO NOTHING", (user, user, ""))
                 st.success("Erfolgreich! Logg dich jetzt ein.")
-            except: st.error("Name schon vergeben!")
+            except Exception: st.error("Name schon vergeben!")
         elif choice == "Login" and st.button("Login"):
-            res = run_query("SELECT password, role FROM users WHERE username=?", (user,))
+            res = run_query("SELECT password, role FROM users WHERE username=%s", (user,))
             if res and res[0][0] == hashlib.sha256(pw.encode()).hexdigest():
                 st.session_state.update({'logged_in': True, 'username': user, 'role': res[0][1]})
                 st.rerun()
@@ -101,10 +104,10 @@ with st.sidebar:
             st.rerun()
 
 st.markdown("<h1 class='main-title'>🏀 Office Slam Dunk Tracker</h1>", unsafe_allow_html=True)
-st.markdown("<p class='sub-title'>High-End Büro-Basketball Analytics</p>", unsafe_allow_html=True)
+st.markdown("<p class='sub-title'>High-End Büro-Basketball Analytics (Powered by PostgreSQL Cloud)</p>", unsafe_allow_html=True)
 
 if st.session_state['logged_in']:
-    conn = sqlite3.connect(DB_FILE)
+    conn = psycopg2.connect(DB_URL)
     df_matches = pd.read_sql("SELECT * FROM matches", conn)
     df_scores = pd.read_sql("SELECT * FROM match_scores", conn)
     conn.close()
@@ -167,7 +170,7 @@ if st.session_state['logged_in']:
 
         highlights = []
         for p, d in p_stats.items():
-            nick = run_query("SELECT nickname FROM profiles WHERE username=?", (p,))
+            nick = run_query("SELECT nickname FROM profiles WHERE username=%s", (p,))
             nick = nick[0][0] if nick and nick[0][0] else p
             if (int(d['hits']) // 50) * 50 > 0 and (d['hits'] % 50) <= 15: 
                 highlights.append(f"🎯 **Meilenstein erreicht!** {nick} hat die legendäre **{(int(d['hits']) // 50) * 50}-Treffer-Marke** durchbrochen!")
@@ -260,7 +263,7 @@ if st.session_state['logged_in']:
         if not df_all.empty and p_stats:
             selected_player = st.selectbox("Wähle einen Athleten aus:", list(p_stats.keys()))
             
-            nick_res = run_query("SELECT nickname, avatar FROM profiles WHERE username=?", (selected_player,))
+            nick_res = run_query("SELECT nickname, avatar FROM profiles WHERE username=%s", (selected_player,))
             nickname = nick_res[0][0] if nick_res and nick_res[0][0] else selected_player
             avatar = nick_res[0][1] if nick_res and nick_res[0][1] else ""
             
@@ -452,12 +455,12 @@ if st.session_state['logged_in']:
                 st.error("Bitte alle Namen ausfüllen (bei 'Neuer Spieler' das Textfeld nutzen)!")
             else:
                 mode = "1v" * (len(players_data)-1) + "1"
-                conn = sqlite3.connect(DB_FILE)
+                conn = psycopg2.connect(DB_URL)
                 cur = conn.cursor()
-                cur.execute("INSERT INTO matches (date, mode, is_historical) VALUES (?, ?, ?)", (str(date.today()), mode, False))
-                m_id = cur.lastrowid
+                cur.execute("INSERT INTO matches (date, mode, is_historical) VALUES (%s, %s, %s) RETURNING id", (str(date.today()), mode, False))
+                m_id = cur.fetchone()[0]
                 for p in players_data:
-                    cur.execute("INSERT INTO match_scores (match_id, player_name, shots, hits, pts, shot_data) VALUES (?, ?, ?, ?, ?, ?)", (m_id, p['name'], p['shots'], p['hits'], p['pts'], p['shot_data']))
+                    cur.execute("INSERT INTO match_scores (match_id, player_name, shots, hits, pts, shot_data) VALUES (%s, %s, %s, %s, %s, %s)", (m_id, p['name'], p['shots'], p['hits'], p['pts'], p['shot_data']))
                 conn.commit()
                 conn.close()
                 st.balloons()
@@ -538,15 +541,15 @@ if st.session_state['logged_in']:
                     # Chronologisch sortieren nach Datum, damit Match-IDs perfekt stimmen!
                     import_list.sort(key=lambda x: x['date'])
 
-                    conn = sqlite3.connect(DB_FILE)
+                    conn = psycopg2.connect(DB_URL)
                     cur = conn.cursor()
                     new_count = 0
                     for match in import_list:
-                        cur.execute("INSERT INTO matches (date, mode, is_historical) VALUES (?, ?, ?)", (match['date'], match['mode'], True))
-                        m_id = cur.lastrowid
+                        cur.execute("INSERT INTO matches (date, mode, is_historical) VALUES (%s, %s, %s) RETURNING id", (match['date'], match['mode'], True))
+                        m_id = cur.fetchone()[0]
                         for p in match['players']:
                             if pd.notna(p['name']) and str(p['name']).strip() != '' and str(p['name']) != 'nan':
-                                cur.execute("INSERT INTO match_scores (match_id, player_name, shots, hits, pts, shot_data) VALUES (?,?,?,?,?,?)", 
+                                cur.execute("INSERT INTO match_scores (match_id, player_name, shots, hits, pts, shot_data) VALUES (%s,%s,%s,%s,%s,%s)", 
                                             (m_id, str(p['name']).strip(), int(p['shots']) if pd.notna(p['shots']) else 10, int(p['hits']) if pd.notna(p['hits']) else 0, float(p['pts']) if pd.notna(p['pts']) else 0, '[]'))
                         new_count += 1
                     
@@ -559,10 +562,10 @@ if st.session_state['logged_in']:
             st.markdown("### 🧨 DANGER ZONE (Datenbank löschen)")
             if st.checkbox("Ich bin mir sicher, dass ich alle Matches unwiderruflich löschen möchte."):
                 if st.button("🚨 GESAMTE MATCH-DATENBANK ZURÜCKSETZEN 🚨"):
-                    conn = sqlite3.connect(DB_FILE)
+                    conn = psycopg2.connect(DB_URL)
                     cur = conn.cursor()
-                    cur.execute("DROP TABLE IF EXISTS matches")
                     cur.execute("DROP TABLE IF EXISTS match_scores")
+                    cur.execute("DROP TABLE IF EXISTS matches")
                     conn.commit()
                     conn.close()
                     init_db()
