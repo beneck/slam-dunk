@@ -71,6 +71,21 @@ def format_date_eu(date_str):
     try: return datetime.strptime(str(date_str)[:10], "%Y-%m-%d").strftime("%d.%m.%Y")
     except: return str(date_str)
 
+# --- 🚀 TURBO: DATENBANK CACHING ---
+# Speichert die Ergebnisse im Arbeitsspeicher (RAM). Verfällt automatisch nach 10 Minuten.
+@st.cache_data(ttl=600)
+def load_all_data():
+    conn = psycopg2.connect(DB_URL)
+    df_m = pd.read_sql("SELECT * FROM matches", conn)
+    df_s = pd.read_sql("SELECT * FROM match_scores", conn)
+    conn.close()
+    
+    # Profile einmalig laden anstatt für jeden Spieler einzeln in einer Schleife
+    profiles_raw = run_query("SELECT username, nickname FROM profiles")
+    profiles_dict = {row[0]: row[1] for row in profiles_raw} if profiles_raw else {}
+    
+    return df_m, df_s, profiles_dict
+
 if 'logged_in' not in st.session_state:
     st.session_state.update({'logged_in': False, 'username': '', 'role': ''})
 
@@ -89,6 +104,7 @@ with st.sidebar:
             try:
                 run_query("INSERT INTO users (username, password, role) VALUES (%s, %s, %s)", (user, hashlib.sha256(pw.encode()).hexdigest(), 'user'))
                 run_query("INSERT INTO profiles (username, nickname, avatar) VALUES (%s, %s, %s) ON CONFLICT (username) DO NOTHING", (user, user, ""))
+                st.cache_data.clear() # Cache leeren, damit das neue Profil sofort verfügbar ist
                 st.success("Erfolgreich! Logg dich jetzt ein.")
             except Exception: st.error("Name schon vergeben!")
         elif choice == "Login" and st.button("Login"):
@@ -107,10 +123,9 @@ st.markdown("<h1 class='main-title'>🏀 Office Slam Dunk Tracker</h1>", unsafe_
 st.markdown("<p class='sub-title'>High-End Büro-Basketball Analytics (Powered by PostgreSQL Cloud)</p>", unsafe_allow_html=True)
 
 if st.session_state['logged_in']:
-    conn = psycopg2.connect(DB_URL)
-    df_matches = pd.read_sql("SELECT * FROM matches", conn)
-    df_scores = pd.read_sql("SELECT * FROM match_scores", conn)
-    conn.close()
+    
+    # DATEN SCHNELL AUS DEM RAM LADEN (Dank @st.cache_data)
+    df_matches, df_scores, profiles_dict = load_all_data()
     
     df_all = pd.DataFrame()
     if not df_matches.empty and not df_scores.empty:
@@ -170,8 +185,10 @@ if st.session_state['logged_in']:
 
         highlights = []
         for p, d in p_stats.items():
-            nick = run_query("SELECT nickname FROM profiles WHERE username=%s", (p,))
-            nick = nick[0][0] if nick and nick[0][0] else p
+            # Turbo: Spitzname aus dem RAM laden, anstatt die Datenbank anzufragen!
+            nick = profiles_dict.get(p, p)
+            if not nick: nick = p
+            
             if (int(d['hits']) // 50) * 50 > 0 and (d['hits'] % 50) <= 15: 
                 highlights.append(f"🎯 **Meilenstein erreicht!** {nick} hat die legendäre **{(int(d['hits']) // 50) * 50}-Treffer-Marke** durchbrochen!")
             if (int(d['games']) // 25) * 25 > 0 and (d['games'] % 25) <= 3:
@@ -211,7 +228,8 @@ if st.session_state['logged_in']:
                 lst = []
                 for p, d in sub_stats.items():
                     lst.append({
-                        'Spieler': p, 'Spiele': d['games'], 'Siege': round(d['wins'], 1),
+                        'Spieler': profiles_dict.get(p, p) if profiles_dict.get(p, p) else p, # Zeige Spitzname an falls vorhanden
+                        'Spiele': d['games'], 'Siege': round(d['wins'], 1),
                         'Siegquote (%)': round((d['wins']/d['games'])*100 if d['games']>0 else 0, 1),
                         'Trefferquote (%)': round((d['hits']/d['shots'])*100 if d['shots']>0 else 0, 1),
                         'Trash-Bonus Quote (%)': round((d['bonus']/d['hits'])*100 if d['hits']>0 else 0, 1),
@@ -231,7 +249,7 @@ if st.session_state['logged_in']:
                 st.markdown("<div class='record-card'><h4>🔥 Aktuelle Top Streaks</h4>", unsafe_allow_html=True)
                 active_streaks = sorted([(p, d) for p, d in streaks.items() if d['type'] == 'W' and d['len'] > 1], key=lambda x: x[1]['len'], reverse=True)
                 if active_streaks:
-                    for p, d in active_streaks[:3]: st.markdown(f"<p><b>{p}</b>: {d['len']} Siege in Folge</p>", unsafe_allow_html=True)
+                    for p, d in active_streaks[:3]: st.markdown(f"<p><b>{profiles_dict.get(p, p)}</b>: {d['len']} Siege in Folge</p>", unsafe_allow_html=True)
                 else: st.markdown("<p>Aktuell keine aktiven Siegesserien.</p>", unsafe_allow_html=True)
                 st.markdown("</div>", unsafe_allow_html=True)
             with c_s2:
@@ -239,7 +257,7 @@ if st.session_state['logged_in']:
                 top_streaks = sorted([(p, d) for p, d in streaks.items() if d['max_W'] > 0], key=lambda x: x[1]['max_W'], reverse=True)[:3]
                 for p, d in top_streaks:
                     brk = f"(Beendet von {d['max_W_breaker']})" if d['max_W_breaker'] else "(Noch Aktiv!)"
-                    st.markdown(f"<p><b>{p}</b>: {d['max_W']} Siege {brk}</p>", unsafe_allow_html=True)
+                    st.markdown(f"<p><b>{profiles_dict.get(p, p)}</b>: {d['max_W']} Siege {brk}</p>", unsafe_allow_html=True)
                 st.markdown("</div>", unsafe_allow_html=True)
 
             st.divider()
@@ -249,7 +267,7 @@ if st.session_state['logged_in']:
             hist_rows = []
             for m_id, group in df_all.groupby('match_id'):
                 date_val = group['date'].iloc[0]
-                players_str = ", ".join([f"{r['player_name']} ({int(r['pts'])} Pkt, {int(r['hits'])} Tr)" for _, r in group.iterrows()])
+                players_str = ", ".join([f"{profiles_dict.get(r['player_name'], r['player_name'])} ({int(r['pts'])} Pkt, {int(r['hits'])} Tr)" for _, r in group.iterrows()])
                 hist_rows.append({'Match-ID': int(m_id), 'Datum_raw': date_val, 'Datum': format_date_eu(date_val), 'Modus': group['mode'].iloc[0], 'Ergebnis': players_str})
             
             if hist_rows:
@@ -263,9 +281,8 @@ if st.session_state['logged_in']:
         if not df_all.empty and p_stats:
             selected_player = st.selectbox("Wähle einen Athleten aus:", list(p_stats.keys()))
             
-            nick_res = run_query("SELECT nickname, avatar FROM profiles WHERE username=%s", (selected_player,))
-            nickname = nick_res[0][0] if nick_res and nick_res[0][0] else selected_player
-            avatar = nick_res[0][1] if nick_res and nick_res[0][1] else ""
+            nickname = profiles_dict.get(selected_player, selected_player)
+            if not nickname: nickname = selected_player
             
             player_matches = df_all[df_all['player_name'] == selected_player].sort_values(by=['date', 'match_id']).reset_index(drop=True)
             hist_data, current_form_val, hist_avg_rate, form_str = [], 0, 0, ""
@@ -283,8 +300,8 @@ if st.session_state['logged_in']:
                 if selected_player in h2h and h2h[selected_player]:
                     opp_l = max(h2h[selected_player].items(), key=lambda x: x[1]['L'])
                     opp_w = max(h2h[selected_player].items(), key=lambda x: x[1]['W'])
-                    if opp_l[1]['L'] > 0: nemesis = f"{opp_l[0]} ({opp_l[1]['L']} Niederlagen)"
-                    if opp_w[1]['W'] > 0: favorite = f"{opp_w[0]} ({opp_w[1]['W']} Siege)"
+                    if opp_l[1]['L'] > 0: nemesis = f"{profiles_dict.get(opp_l[0], opp_l[0])} ({opp_l[1]['L']} Niederlagen)"
+                    if opp_w[1]['W'] > 0: favorite = f"{profiles_dict.get(opp_w[0], opp_w[0])} ({opp_w[1]['W']} Siege)"
 
                 for idx, row in player_matches.iterrows():
                     hist_data.append({'Match': f"M{idx+1:02d}", 'pts': row['pts'], 'hits': row['hits'], 'shots': row['shots'], 'bonus': max(0, row['pts']-row['hits'])})
@@ -349,7 +366,7 @@ if st.session_state['logged_in']:
                     for idx, r in p_matches.iterrows():
                         cum_hits += r['hits']
                         cum_shots += r['shots']
-                        comp_data.append({'Match-Nr.': idx+1, 'Spieler': p, 'Kumulierte Trefferquote (%)': (cum_hits/cum_shots)*100 if cum_shots>0 else 0})
+                        comp_data.append({'Match-Nr.': idx+1, 'Spieler': profiles_dict.get(p, p), 'Kumulierte Trefferquote (%)': (cum_hits/cum_shots)*100 if cum_shots>0 else 0})
                 
                 df_comp = pd.DataFrame(comp_data)
                 if not df_comp.empty:
@@ -463,6 +480,7 @@ if st.session_state['logged_in']:
                     cur.execute("INSERT INTO match_scores (match_id, player_name, shots, hits, pts, shot_data) VALUES (%s, %s, %s, %s, %s, %s)", (m_id, p['name'], p['shots'], p['hits'], p['pts'], p['shot_data']))
                 conn.commit()
                 conn.close()
+                st.cache_data.clear() # CACHE LEEREN, damit das neue Match direkt im Leaderboard sichtbar ist!
                 st.balloons()
                 st.success("Match heldenhaft gespeichert!")
                 st.session_state.match_players_count = 2
@@ -538,7 +556,6 @@ if st.session_state['logged_in']:
                                 ]
                             })
 
-                    # Chronologisch sortieren nach Datum, damit Match-IDs perfekt stimmen!
                     import_list.sort(key=lambda x: x['date'])
 
                     conn = psycopg2.connect(DB_URL)
@@ -555,7 +572,8 @@ if st.session_state['logged_in']:
                     
                     conn.commit()
                     conn.close()
-                    st.success(f"Import erfolgreich! {new_count} Matches (chronologisch sortiert) eingelesen.")
+                    st.cache_data.clear() # CACHE LEEREN, damit die importierten Matches sofort sichtbar sind
+                    st.success(f"Import erfolgreich! {new_count} Matches eingelesen.")
                     st.rerun()
 
             st.divider()
@@ -569,6 +587,7 @@ if st.session_state['logged_in']:
                     conn.commit()
                     conn.close()
                     init_db()
+                    st.cache_data.clear() # CACHE LEEREN, damit die App weiß, dass alles gelöscht wurde
                     st.success("Tabelle erfolgreich gelöscht!")
                     st.rerun()
 else:
