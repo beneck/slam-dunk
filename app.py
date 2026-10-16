@@ -452,56 +452,6 @@ if st.session_state['logged_in']:
                     timeline_html += "</div>"
                     st.markdown(timeline_html, unsafe_allow_html=True)
                 
-                # --- NEU: GEGENÜBERSTELLUNG TRAINING VS SPIEL FÜR DIESEN SPIELER ---
-                st.subheader("⚖️ Gegenüberstellung: Training vs. Spiel")
-                p_trains = df_train_all[df_train_all['username'] == selected_player] if not df_train_all.empty else pd.DataFrame()
-                
-                t_sessions = len(p_trains)
-                t_würfe = int(p_trains['shots'].sum()) if not p_trains.empty else 0
-                t_treffer = int(p_trains['hits'].sum()) if not p_trains.empty else 0
-                t_bonus = int(p_trains['bonus'].sum()) if not p_trains.empty else 0
-                t_punkte = t_treffer + t_bonus
-                t_no_scores = int((p_trains['pts'] == 0).sum()) if not p_trains.empty and 'pts' in p_trains.columns else 0 # falls pts gespeichert wurde
-                
-                # Spiele stats
-                s_sessions = int(d['games'])
-                s_würfe = int(d['shots'])
-                s_treffer = int(d['hits'])
-                s_bonus = int(d['bonus'])
-                s_punkte = int(d['pts'])
-                s_no_scores = int(d['no_scores'])
-                
-                comp_df = pd.DataFrame({
-                    "Metrik": [
-                        "Sessions", "Würfe", "Treffer", "Trefferquote", 
-                        "Punkte pro Wurf", "Bonuspunkte", "Bonuspunkte Quote", 
-                        "No-Score Games", "No-Score Quote"
-                    ],
-                    "Training": [
-                        t_sessions,
-                        t_würfe,
-                        t_treffer,
-                        f"{(t_treffer/t_würfe*100):.2f}%" if t_würfe > 0 else "0,00%",
-                        f"{(t_punkte/t_würfe):.4f}" if t_würfe > 0 else "0,0000",
-                        t_bonus,
-                        f"{(t_bonus/t_treffer*100):.2f}%" if t_treffer > 0 else "0,00%",
-                        t_no_scores,
-                        f"{(t_no_scores/t_sessions*100):.2f}%" if t_sessions > 0 else "0,00%"
-                    ],
-                    "Spiel": [
-                        s_sessions,
-                        s_würfe,
-                        s_treffer,
-                        f"{(s_treffer/s_würfe*100):.2f}%" if s_würfe > 0 else "0,00%",
-                        f"{(s_punkte/s_würfe):.4f}" if s_würfe > 0 else "0,0000",
-                        s_bonus,
-                        f"{(s_bonus/s_treffer*100):.2f}%" if s_treffer > 0 else "0,00%",
-                        s_no_scores,
-                        f"{(s_no_scores/s_sessions*100):.2f}%" if s_sessions > 0 else "0,00%"
-                    ]
-                })
-                st.dataframe(comp_df, use_container_width=True, hide_index=True)
-                
                 c_ch1, c_ch2 = st.columns(2)
                 with c_ch1:
                     st.write("📈 **Trefferquote Kumuliert (All-Time):**")
@@ -653,10 +603,10 @@ if st.session_state['logged_in']:
                 st.session_state.match_players_count = 2
                 st.rerun()
                 
-    # ---------------- 5. TRAININGSBEREICH (Direkt-Import deiner Excel-Matrix) ----------------
+    # ---------------- 5. TRAININGSBEREICH (Privat & mit Gegenüberstellung) ----------------
     with tabs[4]:
         st.subheader("🏋️ Individueller Trainingsbereich")
-        st.write("Trainiere deine Würfe, wenn kein Gegner da ist. Diese Daten fließen **nicht** in das offizielle Leaderboard ein.")
+        st.write("Trainiere deine Würfe, wenn mal kein Gegner da ist. Diese Daten sind **privat** und fließen nicht in das offizielle Leaderboard ein.")
         
         current_user = st.session_state['username']
         
@@ -667,9 +617,7 @@ if st.session_state['logged_in']:
                 try:
                     df_t = pd.read_excel(t_file) if t_file.name.endswith('xlsx') else pd.read_csv(t_file)
                     
-                    # Bereinige eventuelle Header-Verschiebungen (falls Zeile 0 die Spaltennamen enthält)
                     if 'Datum' not in df_t.columns and 'Wurf 1' not in df_t.columns:
-                        # Versuche Header in Zeile 1 zu finden
                         df_t = pd.read_excel(t_file, header=1)
                     
                     conn = psycopg2.connect(DB_URL)
@@ -684,7 +632,6 @@ if st.session_state['logged_in']:
                         d_str = pd.to_datetime(d_val, errors='coerce')
                         d_str = d_str.strftime('%Y-%m-%d') if pd.notna(d_str) else str(date.today())
                         
-                        # Zähle Würfe & Treffer aus Wurf 1 - Wurf 10
                         wurf_cols = [c for c in df_t.columns if 'Wurf' in str(c)]
                         shots = len(wurf_cols) if wurf_cols else 10
                         
@@ -692,10 +639,8 @@ if st.session_state['logged_in']:
                         if 'Treffer' in df_t.columns and pd.notna(row['Treffer']):
                             hits = int(row['Treffer'])
                         elif wurf_cols:
-                            # Zähle alles > 0 als Treffer
                             hits = sum(1 for c in wurf_cols if pd.notna(row[c]) and float(row[c]) > 0)
                             
-                        # Punkte & Bonus berechnen (Wert 2 im Wurf bedeutet Mülleimer = Bonus)
                         pts = 0
                         if 'Punkte' in df_t.columns and pd.notna(row['Punkte']):
                             pts = float(row['Punkte'])
@@ -704,8 +649,8 @@ if st.session_state['logged_in']:
                                 val = row[c]
                                 if pd.notna(val):
                                     f_val = float(val)
-                                    if f_val >= 2: pts += 2 # Mülleimer
-                                    elif f_val == 1: pts += 1 # Normaler Korb
+                                    if f_val >= 2: pts += 2
+                                    elif f_val == 1: pts += 1
                                     
                         bonus = max(0, int(pts - hits))
                         
@@ -720,6 +665,55 @@ if st.session_state['logged_in']:
                     st.rerun()
                 except Exception as e:
                     st.error(f"Fehler beim Import: {e}")
+
+        # --- NEU: GEGENÜBERSTELLUNG TRAINING VS SPIEL DIREKT IM TRAININGSBEREICH ---
+        if current_user in p_stats and not df_train_all.empty:
+            p_trains = df_train_all[df_train_all['username'] == current_user]
+            if not p_trains.empty:
+                st.subheader("⚖️ Gegenüberstellung: Training vs. Spiel")
+                
+                t_sessions = len(p_trains)
+                t_würfe = int(p_trains['shots'].sum())
+                t_treffer = int(p_trains['hits'].sum())
+                t_bonus = int(p_trains['bonus'].sum())
+                t_punkte = t_treffer + t_bonus
+                t_no_scores = 0 
+                
+                d = p_stats[current_user]
+                s_sessions = int(d['games'])
+                s_würfe = int(d['shots'])
+                s_treffer = int(d['hits'])
+                s_bonus = int(d['bonus'])
+                s_punkte = int(d['pts'])
+                s_no_scores = int(d['no_scores'])
+                
+                comp_df = pd.DataFrame({
+                    "Metrik": [
+                        "Sessions", "Würfe", "Treffer", "Trefferquote", 
+                        "Punkte pro Wurf", "Bonuspunkte", "Bonuspunkte Quote", 
+                        "No-Score Games", "No-Score Quote"
+                    ],
+                    "Training": [
+                        t_sessions, t_würfe, t_treffer,
+                        f"{(t_treffer/t_würfe*100):.2f}%" if t_würfe > 0 else "0,00%",
+                        f"{(t_punkte/t_würfe):.4f}" if t_würfe > 0 else "0,0000",
+                        t_bonus,
+                        f"{(t_bonus/t_treffer*100):.2f}%" if t_treffer > 0 else "0,00%",
+                        t_no_scores,
+                        f"{(t_no_scores/t_sessions*100):.2f}%" if t_sessions > 0 else "0,00%"
+                    ],
+                    "Spiel": [
+                        s_sessions, s_würfe, s_treffer,
+                        f"{(s_treffer/s_würfe*100):.2f}%" if s_würfe > 0 else "0,00%",
+                        f"{(s_punkte/s_würfe):.4f}" if s_würfe > 0 else "0,0000",
+                        s_bonus,
+                        f"{(s_bonus/s_treffer*100):.2f}%" if s_treffer > 0 else "0,00%",
+                        s_no_scores,
+                        f"{(s_no_scores/s_sessions*100):.2f}%" if s_sessions > 0 else "0,00%"
+                    ]
+                })
+                st.dataframe(comp_df, use_container_width=True, hide_index=True)
+                st.divider()
 
         c1, c2 = st.columns([1, 1])
         with c1:
